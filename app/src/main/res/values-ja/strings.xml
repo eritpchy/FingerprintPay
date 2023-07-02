@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">Fingerprint pay</string>
+    <string name="app_description">WeChat、QQ、Alipay、Taobaoで指紋認証による支払いを可能に</string>
+    <string name="generic_settings">一般的な設定</string>
+    <string name="settings_title_show_icon">アプリアイコンを表示</string>
+</resources>
