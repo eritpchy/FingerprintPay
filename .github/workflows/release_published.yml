@@ -1,0 +1,28 @@
+name: Release Published
+
+on:
+  workflow_dispatch:
+  release:
+    types: [ published ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rclone pass
+        run: |
+          RCLONE_CONFIG_WEBDAV_PASS=$(rclone obscure $WEBDAV_PASSWORD)
+          echo "::add-mask::$RCLONE_CONFIG_WEBDAV_PASS"
+          echo "RCLONE_CONFIG_WEBDAV_PASS=$RCLONE_CONFIG_WEBDAV_PASS" >> $GITHUB_ENV
+        env:
+          WEBDAV_PASSWORD: ${{ secrets.WEBDAV_PASSWORD }}
+      - name: Rclone remove dev
+        uses: andreiio/rclone-action@v1
+        with:
+          args: moveto webdav:/${{ github.event.release.name }}-dev webdav:/${{ github.event.release.name }}
+        env:
+          RCLONE_CONFIG_WEBDAV_TYPE: webdav
+          RCLONE_CONFIG_WEBDAV_USER: ${{secrets.WEBDAV_USERNAME}}
+          RCLONE_CONFIG_WEBDAV_PASS: ${{env.RCLONE_CONFIG_WEBDAV_PASS}}
+          RCLONE_CONFIG_WEBDAV_URL: ${{secrets.WEBDAV_ADDRESS}}
+

@@ -86,7 +86,7 @@ jobs:
               endpoint=${{secrets.WEBDAV_ADDRESS}}
               username=${{secrets.WEBDAV_USERNAME}}
               password=${{secrets.WEBDAV_PASSWORD}}
-              root=/${{ env.release_version }}
+              root=/${{ env.release_version }}-dev
             include: |
               app/build/outputs/apk/release/*.apk
           attempt_limit: 3
@@ -101,7 +101,7 @@ jobs:
               endpoint=${{secrets.WEBDAV_ADDRESS}}
               username=${{secrets.WEBDAV_USERNAME}}
               password=${{secrets.WEBDAV_PASSWORD}}
-              root=/${{ env.release_version }}
+              root=/${{ env.release_version }}-dev
             include: |
               module/build/release/zygisk-*.zip
           attempt_limit: 3
@@ -116,7 +116,7 @@ jobs:
               endpoint=${{secrets.WEBDAV_ADDRESS}}
               username=${{secrets.WEBDAV_USERNAME}}
               password=${{secrets.WEBDAV_PASSWORD}}
-              root=/${{ env.release_version }}
+              root=/${{ env.release_version }}-dev
             include: |
               module/build/release/riru-*.zip
           attempt_limit: 3
