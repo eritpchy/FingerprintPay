@@ -13,7 +13,7 @@
 * Android 4.4+(部分三星机型)
 * [Magisk](https://github.com/topjohnwu/Magisk)、[Zygisk](https://github.com/topjohnwu/Magisk) 、 [Xposed](https://github.com/ElderDrivers/EdXposed) 或 [KernelSU](https://github.com/tiann/KernelSU) + [Zygisk Next](https://github.com/Dr-TSNG/ZygiskNext)
 
-## 他怎么工作呢？
+## 它怎么工作呢？
 1. 利用 [Magisk](https://github.com/topjohnwu/Magisk) 的 [Riru](https://github.com/RikkaApps/Riru)模块 或 Zygisk 加载指纹支付模块
 2. 在指纹支付模块中录入应用的"支付密码"
 3. 使用[TEE](https://source.android.com/docs/security/features/trusty?hl=zh-cn)(v5.0+)将"支付密码"加密保存
