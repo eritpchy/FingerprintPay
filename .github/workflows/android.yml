@@ -18,39 +18,55 @@ jobs:
         with:
           format: YYYYMMDD-HH
           utcOffset: "+08:00"
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Decode Keystore
-        env:
-          ENCODED_STRING: ${{ secrets.SIGNING_STORE_BASE64 }}
-        run: echo $ENCODED_STRING | base64 -di > app/keystore.jks
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-zip-perl
+      - name: Decode proguard rules
+        uses: mobiledevops/secret-to-file-action@v1
+        with:
+          base64-encoded-secret: ${{ secrets.PROGUARD_RULES }}
+          filename: "app/proguard-rules.pro"
+      - name: Decode keystore
+        uses: mobiledevops/secret-to-file-action@v1
+        with:
+          base64-encoded-secret: ${{ secrets.SIGNING_STORE_BASE64 }}
+          filename: "app/keystore.jks"
       - uses: AdoptOpenJDK/install-jdk@v1
         with:
           version: '17'
           architecture: x64
-      - uses: AdoptOpenJDK/install-jdk@v1
-        with:
-          version: '15'
-          architecture: x64
-          targets: 'JAVA_HOME_15'
       - name: Build Riru modules
         run: cd ./module && bash ./make.sh
+        env:
+          BUILD_RELEASE_MINIFYENABLED: ${{ vars.BUILD_RELEASE_MINIFYENABLED }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       - name: Build with Gradle
-        run: ./gradlew clean ":app:assembleRelease"
+        run:  ./gradlew clean && ./gradlew ":app:assembleRelease" -Pxposed=true
         env:
+          BUILD_RELEASE_MINIFYENABLED: ${{ vars.BUILD_RELEASE_MINIFYENABLED }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
       - name: Upload Apk
-        uses: actions/upload-artifact@v2.2.0
+        uses: actions/upload-artifact@v4
         with:
           name: xposed.${{ steps.current-time.outputs.formattedTime }}
           path: app/build/outputs/apk/release/*.apk
+      - name: Upload Mapping
+        uses: actions/upload-artifact@v4
+        with:
+          name: mapping.${{ steps.current-time.outputs.formattedTime }}
+          path: app/build/outputs/mapping/release
       - name: Upload Riru Modules
-        uses: actions/upload-artifact@v2.2.0
+        uses: actions/upload-artifact@v4
         with:
           name: magisk.${{ steps.current-time.outputs.formattedTime }}
           path: |
@@ -76,7 +92,18 @@ jobs:
             app/build/outputs/apk/release/*.apk
             module/build/release/*.zip
           body: "[Github Action](https://github.com/${{github.repository}}/actions/runs/${{github.run_id}})"
+      - name: Check WebDAV credentials
+        id: check-webdav
+        run: |
+          if [[ -n "${{ secrets.WEBDAV_ADDRESS }}" && -n "${{ secrets.WEBDAV_USERNAME }}" && -n "${{ secrets.WEBDAV_PASSWORD }}" ]]; then
+            echo "webdav_available=true" >> $GITHUB_OUTPUT
+            echo "WebDAV credentials are available"
+          else
+            echo "webdav_available=false" >> $GITHUB_OUTPUT
+            echo "WebDAV credentials are missing or incomplete"
+          fi
       - name: Upload artifacts - Xposed
+        if: steps.check-webdav.outputs.webdav_available == 'true'
         uses: Wandalen/wretry.action@master
         with:
           action: bxb100/action-upload@main
@@ -92,6 +119,7 @@ jobs:
           attempt_limit: 3
           attempt_delay: 0
       - name: Upload artifacts - Zygisk
+        if: steps.check-webdav.outputs.webdav_available == 'true'
         uses: Wandalen/wretry.action@master
         with:
           action: bxb100/action-upload@main
@@ -107,6 +135,7 @@ jobs:
           attempt_limit: 3
           attempt_delay: 0
       - name: Upload artifacts - Riru
+        if: steps.check-webdav.outputs.webdav_available == 'true'
         uses: Wandalen/wretry.action@master
         with:
           action: bxb100/action-upload@main

@@ -6,15 +6,15 @@ android {
     defaultConfig {
         applicationId "com.surcumference.fingerprintpay"
         minSdkVersion 14
-        versionCode 34
-        versionName "6.0.0"
+        versionCode 33
+        versionName "5.99.9"
         buildConfigField "String", "APP_PRODUCT_NAME", "\"FingerprintPay\""
     }
 
     buildTypes {
         release {
-            minifyEnabled false
-            shrinkResources false
+            minifyEnabled System.getenv("BUILD_RELEASE_MINIFYENABLED")?.toBoolean() ?: false
+            shrinkResources System.getenv("BUILD_RELEASE_MINIFYENABLED")?.toBoolean() ?: false
             zipAlignEnabled true
             proguardFiles 'proguard-rules.pro'
         }

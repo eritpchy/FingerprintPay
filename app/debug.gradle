@@ -1,6 +1,6 @@
 ext {
     adbPath = "${android.getSdkDirectory()}/platform-tools/adb"
-    buildXposed = false
+    xposed = project.findProperty('xposed')?.toBoolean() ?: false
 }
 def adbPushToAppFiles(dexPath, targetName, targetPackage) {
     exec {
@@ -50,7 +50,7 @@ android.applicationVariants.all { variant ->
         def dexTask = tasks.findByName(isMinifyEnabled ? "minify${buildTypeNameCapitalize}WithR8" : "mergeDex${buildTypeNameCapitalize}")
         if (minifyTask) {
             minifyTask.doFirst {
-                if (buildXposed) {
+                if (xposed) {
                     return
                 }
                 def aaptRulesFile = file("${buildDir}/intermediates/aapt_proguard_file/release/aapt_rules.txt")
@@ -58,9 +58,6 @@ android.applicationVariants.all { variant ->
                     aaptRulesFile.delete()
                 }
             }
-        }
-        tasks.create(name: "assemble${buildTypeNameCapitalize}Xposed", dependsOn: [variant.assemble]) {
-            buildXposed = true
         }
         
         project.ext.appInfo.each {entry ->
