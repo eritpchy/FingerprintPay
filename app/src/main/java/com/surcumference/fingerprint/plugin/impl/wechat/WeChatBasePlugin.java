@@ -71,7 +71,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
     private int mWeChatVersionCode = 0;
     private boolean mFingerprintIdentifyTemporaryBlocking = false;
 
-    // WxaLiteAppTransparentLiteUI support (WeChat 8.0.65+)
+    // LiteApp payment activity support (WeChat 8.0.65+)
     private ViewTreeObserver.OnGlobalLayoutListener mKeyboardLayoutListener;
     private Activity mLiteAppActivity;
     private boolean mLiteAppFirstDetection;
@@ -143,6 +143,14 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         return false;
     }
 
+    /**
+     * WeChat's LiteApp payment host was renamed to WxaLiteAppPayTransparentLiteUI
+     * in newer releases (observed in 8.0.78 / versionCode 3180).
+     */
+    private boolean isLiteAppPaymentActivity(@NonNull String activityClzName) {
+        return activityClzName.contains(".WxaLiteAppTransparentLiteUI")
+                || activityClzName.contains(".WxaLiteAppPayTransparentLiteUI");
+    }
     @Override
     public void onActivityStarted(@NonNull Activity activity) {
         //Xposed not hooked yet!
@@ -160,7 +168,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
             Task.onMain(100, () -> doNewSettingsMenuInject(activity));
         } else if (getVersionCode(activity) >= Constant.WeChat.WECHAT_VERSION_CODE_8_0_20 && activityClzName.contains("com.tencent.mm.ui.LauncherUI")) {
             startFragmentObserver(activity);
-        } else if (activityClzName.contains(".WxaLiteAppTransparentLiteUI")) {
+        } else if (isLiteAppPaymentActivity(activityClzName)) {
             try {
                 mLiteAppActivity = activity;
                 mLiteAppFirstDetection = true;
@@ -268,7 +276,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
             if (!activityClzName.contains(".WalletPayUI") && !activityClzName.contains(".UIPageFragmentActivity")) {
                 if (getVersionCode(activity) >= Constant.WeChat.WECHAT_VERSION_CODE_8_0_20 && activityClzName.contains("com.tencent.mm.ui.LauncherUI")) {
                     stopFragmentObserver(activity);
-                } else if (activityClzName.contains(".WxaLiteAppTransparentLiteUI")) {
+                } else if (isLiteAppPaymentActivity(activityClzName)) {
                     onPayDialogDismiss(activity, activity.getWindow().getDecorView(), DISMISS_WXA_LITE_APP_PAUSE);
                 }
             }
