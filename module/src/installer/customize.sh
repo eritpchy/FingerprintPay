@@ -13,6 +13,7 @@ if [ "$KSU" ]; then
   # 如果安装器不慎被安装，直接删掉
   # 直接删也是不行的，发癫
   (sleep 1 && [ -d "$NVBASE/modules/$INSTALLER_MODID/" ] && rm -rf "$NVBASE/modules/$INSTALLER_MODID/")&
+  ksud module uninstall xfingerprint-pay-batch-installer&
 else
   rm -rf "$INSTALLER_MODPATH/"
 fi
