@@ -19,15 +19,17 @@ jobs:
       - name: Get current time
         id: current-time
         run: echo "formattedTime=$(TZ='Asia/Shanghai' date '+%Y%m%d-%H')" >> $GITHUB_OUTPUT
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - name: set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
       - name: Install Android toolchain
         run: |
           SDK_PLATFORM=$(sed -n 's/^compileSdk=//p' gradle/android-toolchain.properties)
@@ -38,17 +40,17 @@ jobs:
       - name: Build Zygisk five-app module
         run: cd ./module && bash ./make.sh
       - name: Upload Apk
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: xposed.${{ steps.current-time.outputs.formattedTime }}
           path: app/build/outputs/apk/release/*.apk
       - name: Upload WebUI dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webui.${{ steps.current-time.outputs.formattedTime }}
           path: module/webui/dist/
       - name: Upload native modules
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: magisk.${{ steps.current-time.outputs.formattedTime }}
           path: |
