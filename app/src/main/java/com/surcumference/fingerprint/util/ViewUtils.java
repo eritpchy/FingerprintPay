@@ -46,8 +46,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Random;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Created by Jason on 2017/9/9.
@@ -55,74 +53,21 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 public class ViewUtils {
 
-    private static final AtomicInteger sNextGeneratedId = new AtomicInteger(1);
-
-    @SuppressLint("NewApi")
-    public static int generateViewId() {
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            for (; ; ) {
-                final int result = sNextGeneratedId.get();
-                // aapt-generated IDs have the high byte nonzero; clamp to the range under that.
-                int newValue = result + 1;
-                if (newValue > 0x00FFFFFF)
-                    newValue = 1; // Roll over to 1, not 0.
-                if (sNextGeneratedId.compareAndSet(result, newValue)) {
-                    return result;
-                }
-            }
-        } else {
-            return View.generateViewId();
+    public static boolean performActionClick(View view) {
+        if (view == null) return false;
+        long now = SystemClock.uptimeMillis();
+        float x = Math.max(0, view.getWidth()) / 2f;
+        float y = Math.max(0, view.getHeight()) / 2f;
+        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);
+        MotionEvent up = MotionEvent.obtain(now, now + 25, MotionEvent.ACTION_UP, x, y, 0);
+        try {
+            boolean pressed = view.dispatchTouchEvent(down);
+            boolean released = view.dispatchTouchEvent(up);
+            return pressed && released;
+        } finally {
+            down.recycle();
+            up.recycle();
         }
-    }
-
-    public static int initId(View view) {
-        int id;
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            id = generateViewId();
-        } else {
-            id = View.generateViewId();
-        }
-        view.setId(id);
-        return id;
-    }
-
-    public static void performActionClick(View view) {
-        int width = view.getWidth();
-        int height = view.getHeight();
-        if (width < 0) {
-            width = 0;
-        }
-        if (height < 0) {
-            height = 0;
-        }
-        long downTime = SystemClock.uptimeMillis();
-        long eventTime = SystemClock.uptimeMillis() + 200;
-
-        float x = width > 0 ? new Random(downTime).nextInt(width) : 0;
-        float y = height > 0 ? new Random(eventTime).nextInt(height) : 0;
-
-        int metaState = 0;
-        MotionEvent motionEvent = MotionEvent.obtain(
-                downTime,
-                eventTime,
-                MotionEvent.ACTION_DOWN,
-                x,
-                y,
-                metaState
-        );
-        view.dispatchTouchEvent(motionEvent);
-        downTime = SystemClock.uptimeMillis() + 120;
-        eventTime = SystemClock.uptimeMillis() + 200;
-        motionEvent = MotionEvent.obtain(
-                downTime,
-                eventTime,
-                MotionEvent.ACTION_UP,
-                x,
-                y,
-                metaState
-        );
-        view.dispatchTouchEvent(motionEvent);
     }
 
     @Nullable
@@ -272,34 +217,6 @@ public class ViewUtils {
         stringBuffer.append(" viewVisibleInScreen:").append(isViewVisibleInScreen(view));
         stringBuffer.append(" shown:").append(isShown(view));
         return stringBuffer.toString();
-    }
-
-    public static void recursiveLoopChildren(View view) {
-        if (view instanceof ViewGroup) {
-            recursiveLoopChildren((ViewGroup) view);
-        } else {
-            L.d("Empty view");
-        }
-    }
-
-    public static void recursiveLoopChildren(ViewGroup parent) {
-        for (int i = parent.getChildCount() - 1; i >= 0; i--) {
-            final View child = parent.getChildAt(i);
-            if (child instanceof ViewGroup) {
-                recursiveLoopChildren((ViewGroup) child);
-                // DO SOMETHING WITH VIEWGROUP, AFTER CHILDREN HAS BEEN LOOPED
-                L.d("ViewGroup", getViewInfo(child));
-            } else {
-                if (child != null) {
-                    try {
-                        L.d("view", getViewInfo(child));
-                    } catch (Exception e) {
-
-                    }
-                    // DO SOMETHING WITH VIEW
-                }
-            }
-        }
     }
 
     public static void getChildViews(ViewGroup parent, String text, List<View> outList) {
@@ -544,50 +461,6 @@ public class ViewUtils {
             return false;
         }
         return view.getWindowVisibility() == View.VISIBLE;
-    }
-
-    public static ViewGroup getTopestView(View view) {
-        ViewParent parent = view.getParent();
-        if (parent == null || !(parent instanceof ViewGroup)) {
-            return (ViewGroup) view;
-        }
-        return getTopestView((View) parent);
-    }
-
-    public static void relayout(View view) {
-        view.measure(View.MeasureSpec.makeMeasureSpec(view.getWidth(), View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(view.getHeight(), View.MeasureSpec.EXACTLY));
-        view.layout(view.getLeft(),view.getTop(), view.getRight(), view.getBottom());
-    }
-
-    @Nullable
-    public static <T extends ViewGroup> T findParentViewByClass(View view, Class<T> clz) {
-        ViewParent parentView = view.getParent();
-        if (parentView == null) {
-            return null;
-        }
-        if (clz.isAssignableFrom(parentView.getClass())) {
-            return (T) parentView;
-        }
-        if (parentView instanceof View) {
-            return findParentViewByClass((View) parentView, clz);
-        }
-        return null;
-    }
-
-    @Nullable
-    public static ViewGroup findParentViewByClassNamePart(View view, String classPart) {
-        ViewParent parentView = view.getParent();
-        if (parentView == null) {
-            return null;
-        }
-        if (parentView.getClass().getName().contains(classPart)) {
-            return (ViewGroup) parentView;
-        }
-        if (parentView instanceof ViewGroup) {
-            return findParentViewByClassNamePart((ViewGroup) parentView, classPart);
-        }
-        return null;
     }
 
     public static void setAlpha(AlertDialog dialog, float value) {

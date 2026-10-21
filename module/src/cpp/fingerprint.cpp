@@ -1,186 +1,121 @@
-#include <stdbool.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <jni.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <malloc.h>
-
-#include <cstring>
-
-#include <riru.h>
-
-#include "log.h"
 #include "fingerprint.h"
-#include "resource_extractor.h"
+#include "memory_dex.h"
+#include "debug_payload.h"
+#include "config_socket.h"
+#include "log.h"
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstring>
+#include <string>
+#include <vector>
 
-static bool sHookEnable = false;
-static char *sAppDataDir = NULL;
-static char *sNiceName = NULL;
-
-static char *jstringToC(JNIEnv * env, jstring jstr){
-    char *ret = NULL;
-    if (jstr) {
-        const char* str = env->GetStringUTFChars(jstr, NULL);
-        if (str != NULL) {
-            int len = strlen(str);
-            ret = (char*) malloc((len + 1) * sizeof(char));
-            if (ret != NULL){
-                memset(ret, 0, len + 1);
-                memcpy(ret, str, len);
-            }
-            env->ReleaseStringUTFChars(jstr, str);
-        }
-    }
-    return ret;
-}
-
-static bool equals(const char *str1, const char *str2) {
-    if (str1 == NULL && str2 == NULL) {
-        return true;
-    } else {
-        if (str1 != NULL && str2 != NULL) {
-            return strcmp(str1, str2) == 0;
-        } else {
-            return false;
-        }
-    }
-}
-
-
-/**  参数说明：
- *  jdexPath        dex存储路径
- *  jodexPath       优化后的dex包存放位置
- *  jclassName      需要调用jar包中的类名
- *  jmethodName     需要调用的类中的静态方法
- */
-static void loadDex(JNIEnv *env, jstring jdexPath, jstring jodexPath, jstring jclassName,
-    const char* methodName, jstring jarg1, jstring jarg2) {
-
-    if (!jdexPath) {
-        LOGD("MEM ERR");
-        return;
-    }
-
-    if (!jodexPath) {
-        LOGD("MEM ERR");
-        return;
-    }
-
-    if (!jclassName) {
-        LOGD("MEM ERR");
-        return;
-    }
-
-    if (!jarg1) {
-        LOGD("MEM ERR");
-        return;
-    }
-
-    jclass classloaderClass = env->FindClass("java/lang/ClassLoader");
-    jmethodID getsysClassloaderMethod = env->GetStaticMethodID(classloaderClass, "getSystemClassLoader", "()Ljava/lang/ClassLoader;");
-    jobject loader = env->CallStaticObjectMethod(classloaderClass, getsysClassloaderMethod);
-    jclass dexLoaderClass = env->FindClass("dalvik/system/DexClassLoader");
-    jmethodID initDexLoaderMethod = env->GetMethodID(dexLoaderClass, "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/ClassLoader;)V");
-    jobject dexLoader = env->NewObject(dexLoaderClass,initDexLoaderMethod, jdexPath, jodexPath, NULL, loader);
-    jmethodID findclassMethod = env->GetMethodID(dexLoaderClass, "findClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-
-    if (findclassMethod == NULL) {
-        findclassMethod = env->GetMethodID(dexLoaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-    }
-
-    jclass javaClientClass = (jclass)env->CallObjectMethod(dexLoader, findclassMethod, jclassName);
-    jmethodID targetMethod = env->GetStaticMethodID(javaClientClass, methodName, "(Ljava/lang/String;Ljava/lang/String;)V");
-
-    if (targetMethod == NULL) {
-        LOGD("target method(%s) not found", methodName);
-        return;
-    }
-
-    env->CallStaticVoidMethod(javaClientClass, targetMethod, jarg1, jarg2);
-}
-
-void fingerprintPre(JNIEnv *env, jstring *appDataDir, jstring *niceName) {
-    char *cAppDataDir = jstringToC(env, *appDataDir);
-    if (cAppDataDir == NULL) {
-        LOGD("MEM ERR");
-        return;
-    }
-    sAppDataDir = strdup(cAppDataDir);
-    free(cAppDataDir);
-    if (sAppDataDir == NULL) {
-        LOGD("MEM ERR");
-        return;
-    }
-    sNiceName = jstringToC(env, *niceName);
-    if (sNiceName == NULL) {
-        LOGD("MEM ERR");
-        return;
-    }
-
-    if (strstr(MODULE_NAME, "qq")) {
-        sHookEnable = equals(sNiceName, "com.tencent.mobileqq")
-            || equals(sNiceName, "com.tencent.mobileqq:tool");
-    } else if (strstr(MODULE_NAME, "wechat")) {
-        sHookEnable = equals(sNiceName, "com.tencent.mm");
-    } else if (strstr(MODULE_NAME, "alipay")) {
-        sHookEnable = equals(sNiceName, "com.eg.android.AlipayGphone");
-    } else if (strstr(MODULE_NAME, "taobao")) {
-        sHookEnable = equals(sNiceName, "com.taobao.taobao");
-    } else if (strstr(MODULE_NAME, "unionpay")) {
-        sHookEnable = equals(sNiceName, "com.unionpay");
-    } else {
-        perror("unimplement target " MODULE_NAME);
-    }
-}
-
-void fingerprintPost(JNIEnv *env, const char *pluginTypeName) {
-    if (sHookEnable) {
-        char appCacheDir[PATH_MAX] = {0};
-        snprintf(appCacheDir, PATH_MAX - 1, "%s/cache", sAppDataDir);
-        if (access(appCacheDir, 0) != 0) mkdir(appCacheDir, 0755);
-        char appFilesDir[PATH_MAX] = {0};
-        snprintf(appFilesDir, PATH_MAX - 1, "%s/files", sAppDataDir);
-        if (access(appFilesDir, 0) != 0) mkdir(appFilesDir, 0755);
-
-        char dexPath[PATH_MAX] = {0};
-        snprintf(dexPath, PATH_MAX - 1, "%s/" MODULE_NAME ".dex", appFilesDir);
-#ifdef NDEBUG
-        extractDexResource(dexPath);
-#else
-        LOGD("=======================================================");
-        LOGD("==================== DEBUG MODE ON ====================");
-        LOGD("=======================================================");
-        if (access(dexPath, 0) != 0) {
-            extractDexResource(dexPath);
-        }
+extern "C" const unsigned char fp_payload_start[], fp_payload_end[];
+static const char* packages[] = {"com.tencent.mm", "com.eg.android.AlipayGphone", "com.taobao.taobao", "com.tencent.mobileqq", "com.unionpay"};
+static const char* entries[] = {"WeChatPlugin", "AlipayPlugin", "TaobaoPlugin", "QQPlugin", "UnionPayPlugin"};
+static int target = -1, resourceFd = -1;
+static std::string process;
+static int androidUser;
+#ifdef FP_DEBUG_FILE_DEX
+static std::string appData;
+// ART 6/7 keep native pointers into these bytes for the lifetime of the process.
+static std::vector<unsigned char> debugPayload;
 #endif
-        if (access(dexPath, 0) != 0) {
-            LOGE("Error: dexPath:%s is not accessible", dexPath);
-            return;
-        }
-
-        const char *bootClassPath;
-        if (strstr(MODULE_NAME, "qq")) {
-            bootClassPath = "com.surcumference.fingerprint.plugin.magisk.QQPlugin";
-        } else if (strstr(MODULE_NAME, "wechat")) {
-            bootClassPath = "com.surcumference.fingerprint.plugin.magisk.WeChatPlugin";
-        } else if (strstr(MODULE_NAME, "alipay")) {
-            bootClassPath = "com.surcumference.fingerprint.plugin.magisk.AlipayPlugin";
-        } else if (strstr(MODULE_NAME, "taobao")) {
-            bootClassPath = "com.surcumference.fingerprint.plugin.magisk.TaobaoPlugin";
-        } else if (strstr(MODULE_NAME, "unionpay")) {
-            bootClassPath = "com.surcumference.fingerprint.plugin.magisk.UnionPayPlugin";
-        } else {
-            perror("unimplement target " MODULE_NAME);
-        }
-        loadDex(env,
-            env->NewStringUTF(dexPath),
-            env->NewStringUTF(appCacheDir),
-            env->NewStringUTF(bootClassPath),
-            "main",
-            env->NewStringUTF(sNiceName),
-            env->NewStringUTF(pluginTypeName)
-        );
+void fingerprintDeferResource() { if (resourceFd >= 0) close(resourceFd); resourceFd = -1; }
+void fingerprintDisable() { target = -1; if (resourceFd >= 0) { close(resourceFd); resourceFd = -1; } }
+bool fingerprintEnabled() { return target >= 0; }
+int fingerprintResourceFd() { return resourceFd; }
+void fingerprintPre(JNIEnv* env, jstring* appDataDir, jstring* niceName, int uid, int companion, int moduleDir) {
+    target = -1; process.clear();
+    if (resourceFd >= 0) { close(resourceFd); resourceFd = -1; }
+    if (!niceName || !*niceName) return;
+    const char* value = env->GetStringUTFChars(*niceName, nullptr);
+    if (!value) return;
+    process = value; env->ReleaseStringUTFChars(*niceName, value);
+    for (int i = 0; i < 5; ++i) if (process == packages[i] || (i == 3 && process == "com.tencent.mobileqq:tool")) { target = i; break; }
+    if (target < 0) return;
+#ifdef FP_DEBUG_FILE_DEX
+    appData.clear();
+    if (appDataDir && *appDataDir) {
+        const char* directory = env->GetStringUTFChars(*appDataDir, nullptr);
+        if (directory) { appData = directory; env->ReleaseStringUTFChars(*appDataDir, directory); }
     }
+#endif
+    androidUser = uid / 100000;
+    LOGI("Checking target %s user %d", process.c_str(), androidUser);
+    std::string query = "{\"op\":\"scope\",\"package\":\"" + std::string(packages[target])
+            + "\",\"user\":" + std::to_string(uid / 100000) + "}";
+    if (companion >= 0) {
+        if (!fp::frame(companion, query, true) || !fp::frame(companion, query, false)) { LOGE("Scope companion transport failed: %d", errno); target = -1; return; }
+    } else query = fp::request(query);
+    if (query != "1") { LOGW("Injection skipped: scope reply %s", query == "0" ? "disabled" : query.empty() ? "unavailable" : "invalid"); target = -1; return; }
+    resourceFd = moduleDir >= 0 ? openat(moduleDir, "resources.apk", O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            : open("/data/adb/modules/" MODULE_NAME "/resources.apk", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (resourceFd < 0) LOGW("Deferring resource open: %d (module directory %d)", errno, moduleDir);
+    else LOGI("Target resource descriptor ready");
+}
+void fingerprintPost(JNIEnv* env, const char* type) {
+    if (target < 0) return;
+    const unsigned char* payload = fp_payload_start;
+    size_t payloadSize = fp_payload_end - fp_payload_start;
+#ifdef FP_DEBUG_FILE_DEX
+    int debugResources = -1;
+    DebugPayloadResult debug = loadDebugPayload(appData.c_str(), debugPayload, debugResources);
+    if (debug == DebugPayloadResult::Invalid) { fingerprintDeferResource(); LOGE("Invalid debug DEX deployment for %s", process.c_str()); return; }
+    if (debug == DebugPayloadResult::Loaded) {
+        fingerprintDeferResource(); resourceFd = debugResources;
+        payload = debugPayload.data(); payloadSize = debugPayload.size();
+        LOGI("Loading local debug DEX for %s", process.c_str());
+    }
+#endif
+    if (resourceFd < 0) {
+        std::string query = "{\"op\":\"resource\",\"package\":\"" + std::string(packages[target])
+                + "\",\"user\":" + std::to_string(androidUser) + ",\"sha256\":\"" FP_RESOURCE_SHA256 "\"}";
+        resourceFd = fp::resource_request(query);
+        if (resourceFd < 0) { LOGE("Resource descriptor service failed: %d", errno); return; }
+        LOGI("Resource descriptor received after specialization");
+    }
+    if (env->PushLocalFrame(256) != JNI_OK) return;
+    bool ok = false;
+    do {
+        std::vector<DexBytes> dex;
+        if (!parseDexPayload(payload, payloadSize, dex)) break;
+        jclass base = env->FindClass("java/lang/ClassLoader");
+        if (!base || env->ExceptionCheck()) break;
+        jmethodID systemLoader = env->GetStaticMethodID(base, "getSystemClassLoader", "()Ljava/lang/ClassLoader;");
+        if (!systemLoader || env->ExceptionCheck()) break;
+        jobject parent = env->CallStaticObjectMethod(base, systemLoader);
+        if (!parent || env->ExceptionCheck()) break;
+        jobject loader = memoryDexLoader(env, dex.data(), dex.size(), parent);
+        if (!loader || env->ExceptionCheck()) break;
+        jmethodID load = env->GetMethodID(base, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+        if (!load || env->ExceptionCheck()) break;
+        auto find = [&](const char* name) { return static_cast<jclass>(env->CallObjectMethod(loader, load, env->NewStringUTF(name))); };
+        std::string path = "/proc/self/fd/" + std::to_string(resourceFd);
+        jclass resourceParent = find("com.surcumference.fingerprint.util.MemoryResourceLoader");
+        if (!resourceParent || env->ExceptionCheck()) break;
+        jmethodID resourceConstructor = env->GetMethodID(resourceParent, "<init>", "(Ljava/lang/ClassLoader;Ljava/lang/String;)V");
+        if (!resourceConstructor || env->ExceptionCheck()) break;
+        jobject resources = env->NewObject(resourceParent, resourceConstructor, parent, env->NewStringUTF(path.c_str()));
+        if (!resources || env->ExceptionCheck()) break;
+        jfieldID parentField = env->GetFieldID(base, "parent", "Ljava/lang/ClassLoader;");
+        if (!parentField || env->ExceptionCheck()) break;
+        env->SetObjectField(loader, parentField, resources);
+        if (env->ExceptionCheck()) break;
+        jclass resourceContext = find("com.surcumference.fingerprint.util.ModuleResources");
+        if (!resourceContext || env->ExceptionCheck()) break;
+        jmethodID setPath = env->GetStaticMethodID(resourceContext, "setPayloadPath", "(Ljava/lang/String;)V");
+        if (!setPath || env->ExceptionCheck()) break;
+        env->CallStaticVoidMethod(resourceContext, setPath, env->NewStringUTF(path.c_str()));
+        if (env->ExceptionCheck()) break;
+        std::string entry = std::string("com.surcumference.fingerprint.plugin.magisk.") + entries[target];
+        jclass plugin = find(entry.c_str());
+        if (!plugin || env->ExceptionCheck()) break;
+        jmethodID main = env->GetStaticMethodID(plugin, "main", "(Ljava/lang/String;Ljava/lang/String;)V");
+        if (!main || env->ExceptionCheck()) break;
+        env->CallStaticVoidMethod(plugin, main, env->NewStringUTF(process.c_str()), env->NewStringUTF(type));
+        ok = !env->ExceptionCheck();
+    } while (false);
+    if (ok) LOGI("In-memory module initialized for %s", process.c_str());
+    if (!ok) { if (env->ExceptionCheck()) { env->ExceptionDescribe(); env->ExceptionClear(); } LOGE("In-memory module initialization failed"); }
+    env->PopLocalFrame(nullptr);
 }

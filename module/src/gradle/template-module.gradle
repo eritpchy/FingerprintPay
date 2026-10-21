@@ -1,5 +1,4 @@
 import org.apache.tools.ant.filters.FixCrLfFilter
-import org.apache.tools.ant.filters.ReplaceTokens
 
 import java.security.MessageDigest
 
@@ -8,7 +7,7 @@ plugins {
 }
 
 apply from: rootProject.file('module.gradle')
-apply from: rootProject.file('../../gradle/android-toolchain.gradle')
+apply from: rootProject.file(project.property('fingerprintRoot').toString() + '/gradle/android-toolchain.gradle')
 
 android {
     namespace = 'com.example.app'
@@ -16,17 +15,11 @@ android {
         minSdk = 23
         externalNativeBuild {
             cmake {
-                arguments "-DMODULE_NAME:STRING=$moduleLibraryName",
-                        "-DRIRU_MODULE_API_VERSION=$moduleRiruApiVersion",
-                        "-DRIRU_MODULE_VERSION=$moduleVersionCode",
-                        "-DRIRU_MODULE_VERSION_NAME:STRING=$moduleVersion",
-                        "-DRIRU_MODULE_MIN_API_VERSION=$moduleMinRiruApiVersion",
-                        "-DRESOURCE_BIN:STRING=$moduleResourcePath"
+                targets moduleLibraryName, "fpconfig"
+                arguments "-DMODULE_NAME:STRING=$moduleLibraryName", "-DANDROID_STL=c++_static",
+                        "-DFINGERPRINT_ROOT:PATH=${project.property('fingerprintRoot')}"
             }
         }
-    }
-    buildFeatures {
-        prefab true
     }
     externalNativeBuild {
         cmake {
@@ -34,10 +27,6 @@ android {
             version "3.22.1"
         }
     }
-}
-
-dependencies {
-    implementation 'dev.rikka.ndk:riru:26.0.0'
 }
 
 androidComponents.onVariants(androidComponents.selector().all()) { variant ->
@@ -49,42 +38,47 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
 
     tasks.register("prepareMagiskFiles${variantCapped}", Sync) {
         dependsOn("assemble$variantCapped")
+        def metadata = [
+                id: magiskModuleId,
+                name: moduleName,
+                version: moduleVersion,
+                versionCode: moduleVersionCode.toString(),
+                author: moduleAuthor,
+                description: moduleDescription,
+                updateJson: moduleUpdateJson,
+        ]
+        inputs.properties(metadata)
 
         def templatePath = "$rootDir/template/magisk_module"
 
         into magiskDir
         from(templatePath) {
-            exclude 'riru.sh', 'module.prop'
-        }
-        from(templatePath) {
-            include 'riru.sh'
-            filter(ReplaceTokens.class, tokens: [
-                    "RIRU_MODULE_LIB_NAME"             : moduleLibraryName,
-                    "RIRU_MODULE_API_VERSION"          : moduleRiruApiVersion.toString(),
-                    "RIRU_MODULE_MIN_API_VERSION"      : moduleMinRiruApiVersion.toString(),
-                    "RIRU_MODULE_MIN_RIRU_VERSION_NAME": moduleMinRiruVersionName,
-            ])
-            filter(FixCrLfFilter.class,
-                    eol: FixCrLfFilter.CrLf.newInstance("lf"))
+            exclude 'module.prop'
         }
         from(templatePath) {
             include 'module.prop'
-            expand([
-                    id         : magiskModuleId,
-                    name       : moduleName,
-                    version    : moduleVersion,
-                    versionCode: moduleVersionCode.toString(),
-                    author     : moduleAuthor,
-                    description: moduleDescription,
-                    updateJson : moduleUpdateJson,
-            ])
+            expand(metadata)
             filter(FixCrLfFilter.class,
                     eol: FixCrLfFilter.CrLf.newInstance("lf"))
         }
         from("$buildDir/intermediates/stripped_native_libs/$variantLowered/strip${variantCapped}DebugSymbols/out/lib") {
             into 'lib'
         }
+        from(rootProject.file(project.property('fingerprintRoot').toString() + '/module/build/bin')) {
+            include '**/fpconfig'
+            into 'bin'
+        }
         doLast {
+            def resources = file("$magiskDir/resources.apk")
+            def resourceHash = MessageDigest.getInstance('SHA-256').digest(resources.bytes).encodeHex().toString()
+            def expectedHash = '"sha256":"' + resourceHash + '"'
+            fileTree("$magiskDir/lib").matching { include '**/*.so' }.each { library ->
+                if (!new String(library.bytes, java.nio.charset.StandardCharsets.ISO_8859_1).contains(expectedHash)) {
+                    throw new GradleException("Native resource hash mismatch: ${library.name}")
+                }
+            }
+            file("$magiskDir/description.original").text = metadata.description + "\n"
+            if (variant.buildType == 'debug') file("$magiskDir/debug-file-dex").text = "1\n"
             fileTree("$magiskDir").visit { f ->
                 if (f.directory) return
 

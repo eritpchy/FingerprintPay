@@ -7,20 +7,19 @@ import android.content.Intent;
 import android.net.Uri;
 import android.text.TextUtils;
 
-import androidx.annotation.Nullable;
 
 import com.hjq.toast.Toaster;
 import com.surcumference.fingerprint.BuildConfig;
 import com.surcumference.fingerprint.Constant;
 import com.surcumference.fingerprint.Lang;
 import com.surcumference.fingerprint.R;
-import com.surcumference.fingerprint.bean.PluginTarget;
 import com.surcumference.fingerprint.bean.PluginType;
 import com.surcumference.fingerprint.bean.UpdateInfo;
 import com.surcumference.fingerprint.network.inf.UpdateResultListener;
 import com.surcumference.fingerprint.network.update.github.GithubUpdateChecker;
 import com.surcumference.fingerprint.plugin.PluginApp;
 import com.surcumference.fingerprint.util.ApplicationUtils;
+import com.surcumference.fingerprint.util.ActivityContext;
 import com.surcumference.fingerprint.util.Config;
 import com.surcumference.fingerprint.util.FileUtils;
 import com.surcumference.fingerprint.util.Task;
@@ -31,10 +30,7 @@ import com.surcumference.fingerprint.view.UpdateInfoView;
 
 
 import java.io.File;
-import java.util.HashMap;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.Callable;
 
 /**
  * Created by Jason on 2017/9/10.
@@ -47,19 +43,20 @@ public class UpdateFactory {
     }
 
     public static void doUpdateCheck(final Context context, final boolean quite, final boolean dontSkip) {
+        doUpdateCheck(context, quite, dontSkip, PluginApp.getCurrentType());
+    }
+
+    public static void doUpdateCheck(final Context context, final boolean quite, final boolean dontSkip, final PluginType type) {
+        doUpdateCheck(context, quite, dontSkip, type, BuildConfig.VERSION_NAME);
+    }
+
+    public static void doUpdateCheck(final Context context, final boolean quite, final boolean dontSkip, final PluginType type, final String localVersion) {
+        final boolean sameBackend = type == PluginApp.getCurrentType();
         if (!quite) {
             Toaster.showLong(Lang.getString(R.id.toast_checking_update));
         }
         try {
-            String packageName = context.getPackageName();
-            String fileName = PluginApp.runActionBaseOnCurrentPluginType(new HashMap<PluginType, Callable<String>>() {{
-                put(PluginType.Riru, () -> packageName + ".riru.zip");
-                put(PluginType.Zygisk, () -> packageName + ".zygisk.zip");
-                put(PluginType.Xposed, () -> packageName + ".apk");
-            }});
-            File targetFile = FileUtils.getSharableFile(context, fileName);
-            FileUtils.delete(targetFile);
-            new GithubUpdateChecker(BuildConfig.VERSION_NAME, Constant.UPDATE_URLS,
+            new GithubUpdateChecker(localVersion, Constant.UPDATE_URLS, type,
                     new UpdateResultListener() {
                 @Override
                 public void onNoUpdate() {
@@ -77,7 +74,7 @@ public class UpdateFactory {
 
                 @Override
                 public void onHasUpdate(UpdateInfo updateInfo) {
-                    if (!dontSkip) {
+                    if (!dontSkip && sameBackend) {
                         if (isSkipVersion(context, updateInfo.version)) {
                             L.d("已跳過版本: " + updateInfo.version);
                             return;
@@ -87,25 +84,21 @@ public class UpdateFactory {
                     UpdateInfoView updateInfoView = new UpdateInfoView(context);
                     updateInfoView.setTitle(Lang.getString(R.id.found_new_version) + updateInfo.version);
                     updateInfoView.setContent(updateInfo.content);
-                    updateInfoView.withOnNeutralButtonClickListener((dialogInterface, i) -> {
-                        Config.from(context).setSkipVersion(updateInfo.version);
-                        dialogInterface.dismiss();
-                    });
+                    if (sameBackend) {
+                        updateInfoView.withOnNeutralButtonClickListener((dialogInterface, i) -> {
+                            Config.from(context).setSkipVersion(updateInfo.version);
+                            dialogInterface.dismiss();
+                        });
+                    } else updateInfoView.withNeutralButtonText(null);
                     updateInfoView.withOnPositiveButtonClickListener((dialogInterface, i) -> {
-                        PluginApp.runActionBaseOnCurrentPluginType(new HashMap<PluginType, Callable<Object>>() {{
-                            put(PluginType.Riru, () -> {
-                                handleMagiskUpdate(context, updateInfo, dialogInterface);
-                                return null;
-                            });
-                            put(PluginType.Zygisk, () -> {
-                                handleMagiskUpdate(context, updateInfo, dialogInterface);
-                                return null;
-                            });
-                            put(PluginType.Xposed, () -> {
-                                handleXposedUpdate(context, updateInfo, dialogInterface);
-                                return null;
-                            });
-                        }});
+                        if (type == PluginType.Zygisk
+                                && !ModuleInstaller.isAvailable(context)) {
+                            dialogInterface.dismiss();
+                            createUpdateHandoff(context, Lang.getString(R.id.module_update_note),
+                                    R.id.open_root_manager, () -> openRootManager(context)).showInDialog();
+                        } else {
+                            downloadUpdate(context, updateInfo, dialogInterface, type);
+                        }
                     });
                     Task.onMain(200, updateInfoView::showInDialog);
                 }
@@ -116,39 +109,65 @@ public class UpdateFactory {
         }
     }
 
-    private static void handleMagiskUpdate(Context context, UpdateInfo updateInfo, DialogInterface updateInfoViewDialogInterface) {
-        com.surcumference.fingerprint.util.UrlUtils.openUrl(context, updateInfo.pageUrl);
-        Task.onMain(1000, () -> Toaster.showLong(Lang.getString(R.id.toast_update_available)));
-        updateInfoViewDialogInterface.dismiss();
+    private static void downloadUpdate(Context context, UpdateInfo info, DialogInterface updateDialog, PluginType type) {
+        boolean module = type == PluginType.Zygisk;
+        File target = module ? new File(context.getCacheDir(), "fingerprintpay-module.zip")
+                : FileUtils.getSharableFile(context, context.getPackageName() + ".apk");
+        String mirror = String.format(Locale.ROOT, Constant.UPDATE_URL_MIRROR_FILE, info.version, info.name);
+        updateDialog.dismiss();
+        new DownloadView(context).download(new String[]{mirror, info.url}, target, info.size, info.digest, () -> {
+            if (module) {
+                Task.onBackground(() -> {
+                    try {
+                        Intent install = ModuleInstaller.prepare(context, target, info.version);
+                        Task.onMain(() -> {
+                            if (!ActivityContext.isAlive(ActivityContext.find(context))) return;
+                            try { context.startActivity(install); }
+                            catch (Exception error) { showUpdateError(context, error); }
+                        });
+                    } catch (Exception error) { Task.onMain(() -> showUpdateError(context, error)); }
+                });
+            } else {
+                try { installApk(context, target); }
+                catch (Exception error) { showUpdateError(context, error); }
+            }
+        }).showInDialog();
     }
 
-    private static Map<PluginTarget, File> matchMagiskModuleFileListToPluginTarget(@Nullable File[] moduleZipFiles) {
-        Map<PluginTarget, File> map = new HashMap<>();
-        if (moduleZipFiles == null) {
-            return map;
-        }
-        PluginApp.iterateAllPluginTarget(pluginTarget -> {
-            for (File file : moduleZipFiles) {
-                if (file.getName().contains(pluginTarget.name().toLowerCase())) {
-                    map.put(pluginTarget, file);
+    private static void openRootManager(Context context) {
+        String[] managers = {"com.topjohnwu.magisk", "me.weishu.kernelsu", "com.rifsxd.ksunext", "me.bmax.apatch"};
+        for (String manager : managers) {
+            Intent launch = context.getPackageManager().getLaunchIntentForPackage(manager);
+            if (launch != null) {
+                try {
+                    context.startActivity(launch);
                     return;
+                } catch (Exception e) {
+                    L.e(e);
                 }
             }
-        });
-        return map;
+        }
+        throw new IllegalStateException(Lang.getString(R.id.root_manager_missing));
     }
 
-    private static void handleXposedUpdate(Context context, UpdateInfo updateInfo, DialogInterface updateInfoViewDialogInterface) {
-        String fileName = context.getPackageName() + ".apk";
-        File targetFile = FileUtils.getSharableFile(context, fileName);
-        FileUtils.delete(targetFile);
-        String mirrorUrl = String.format(Locale.getDefault(), Constant.UPDATE_URL_MIRROR_FILE, updateInfo.version, updateInfo.name);
-        new DownloadView(context)
-                .download(new String[]{mirrorUrl, updateInfo.url}, targetFile, updateInfo.size, () -> {
-                    updateInfoViewDialogInterface.dismiss();
-                    UpdateFactory.installApk(context, targetFile);
-                    new MessageView(context).text(Lang.getString(R.id.update_success_note)).showInDialog();
-                }).showInDialog();
+    private static MessageView createUpdateHandoff(Context context, String message, int actionLabel, Runnable action) {
+        MessageView guidance = new MessageView(context).text(message);
+        guidance.withNegativeButtonText(Lang.getString(R.id.cancel));
+        guidance.withPositiveButtonText(Lang.getString(actionLabel));
+        guidance.withOnPositiveButtonClickListener((dialog, which) -> {
+            dialog.dismiss();
+            try { action.run(); }
+            catch (Exception error) { showUpdateError(context, error); }
+        });
+        return guidance;
+    }
+
+    private static void showUpdateError(Context context, Exception error) {
+        L.e(error);
+        if (ActivityContext.isAlive(ActivityContext.find(context))) {
+            new MessageView(context).title(Lang.getString(R.id.update_failed))
+                    .text(error.getMessage()).showInDialog();
+        }
     }
 
     public static void lazyUpdateWhenActivityAlive() {
@@ -162,7 +181,7 @@ public class UpdateFactory {
                     Task.onMain(lazyCheckTimeMsec, this);
                     return;
                 }
-                UpdateFactory.doUpdateCheck(activity);
+                if (Config.from(activity).isAutoUpdate()) UpdateFactory.doUpdateCheck(activity);
             }
         });
     }
@@ -186,6 +205,6 @@ public class UpdateFactory {
         Intent intent = new Intent(Intent.ACTION_VIEW);
         intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         intent.setDataAndType(uri, "application/vnd.android.package-archive");
-        Task.onMain(() -> context.startActivity(intent));
+        context.startActivity(intent);
     }
 }

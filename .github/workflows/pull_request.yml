@@ -32,7 +32,7 @@ jobs:
           BUILD_TOOLS=$(sed -n 's/^buildToolsVersion=//p' gradle/android-toolchain.properties)
           NDK_VERSION=$(sed -n 's/^ndkVersion=//p' gradle/android-toolchain.properties)
           sdkmanager "platforms;android-36" "platforms;android-$SDK_PLATFORM.$SDK_MINOR" "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION" "cmake;3.22.1"
-      - name: Build Riru modules
+      - name: Build Zygisk five-app module
         run: cd ./module && bash ./make.sh
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -43,10 +43,14 @@ jobs:
         with:
           name: xposed.${{ steps.current-time.outputs.formattedTime }}
           path: app/build/outputs/apk/release/*.apk
-      - name: Upload Riru Modules
+      - name: Upload WebUI dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui.${{ steps.current-time.outputs.formattedTime }}
+          path: module/webui/dist/
+      - name: Upload native modules
         uses: actions/upload-artifact@v2.2.0
         with:
           name: magisk.${{ steps.current-time.outputs.formattedTime }}
           path: |
-            module/build/release/*.zip
-            !module/build/release/*-all-*.zip
+            module/build/release/zygisk-module-xfingerprint-pay-all-*.zip

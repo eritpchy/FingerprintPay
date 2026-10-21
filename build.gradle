@@ -16,6 +16,12 @@ buildscript {
 ext.androidApkArtifact = com.android.build.api.artifact.SingleArtifact.APK.INSTANCE
 
 allprojects {
+    dependencyLocking {
+        lockAllConfigurations()
+        if (path == ":3rdparty:FingerprintIdentify:FingerprintIdentifyLib") {
+            lockFile = rootProject.file("gradle/dependency-locks/fingerprint-identify.lockfile")
+        }
+    }
     repositories {
         def REPOSITORY_URL = 'https://maven.aliyun.com/nexus/content/groups/public/'
         all { ArtifactRepository repo ->
@@ -41,3 +47,5 @@ allprojects {
 tasks.register('clean', Delete) {
     delete rootProject.buildDir
 }
+
+apply from: rootProject.file('gradle/webui.gradle')

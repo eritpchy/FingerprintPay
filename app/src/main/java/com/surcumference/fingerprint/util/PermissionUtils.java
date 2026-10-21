@@ -22,22 +22,6 @@ public class PermissionUtils {
     }
 
     /**
-     * Returns true if the Activity or Fragment has access to all given permissions.
-     *
-     * @param context     context
-     * @param permissions permission list
-     * @return returns true if the Activity or Fragment has access to all given permissions.
-     */
-    public static boolean hasSelfPermissions(Context context, String... permissions) {
-        for (String permission : permissions) {
-            if (!hasSelfPermission(context, permission)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
      * Determine context has access to the given permission.
      * <p>
      * This is a workaround for RuntimeException of Parcel#readException.
@@ -46,7 +30,6 @@ public class PermissionUtils {
      * @param context    context
      * @param permission permission
      * @return returns true if context has access to the given permission, false otherwise.
-     * @see #hasSelfPermissions(Context, String...)
      */
     private static boolean hasSelfPermission(Context context, String permission) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && "Xiaomi".equalsIgnoreCase(Build.MANUFACTURER)) {

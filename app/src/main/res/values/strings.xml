@@ -1,6 +1,4 @@
 <resources>
     <string name="app_name">Fingerprint pay</string>
     <string name="app_description">Enable fingerprint pay for WeChat, QQ, Alipay, Taobao</string>
-    <string name="generic_settings">Generic settings</string>
-    <string name="settings_title_show_icon">Show app icon</string>
 </resources>

@@ -3,7 +3,6 @@ package com.surcumference.fingerprint.util.paydialog;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
-import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 
@@ -20,12 +19,6 @@ public class WeChatPayDialog {
         public ViewGroup passwordLayout;
         public EditText inputEditText;
         public List<View> keyboardViews = new ArrayList<>();
-        @Nullable
-        public TextView usePasswordText;
-        // 8.0.57 部分界面移除了
-        @Nullable
-        public TextView titleTextView;
-
         @Nullable
         public static WeChatPayDialog findFrom(int versionCode, ViewGroup rootView) {
             try {
@@ -61,7 +54,9 @@ public class WeChatPayDialog {
                             }
                             payDialog.inputEditText = (EditText)view;
                         }
-                    } else if (view.getClass().getName().endsWith(".MyKeyboardWindow")) {
+                    } else if ((view.getClass().getName().endsWith(".MyKeyboardWindow")
+                            || view.getClass().getName().endsWith(".HkWxKeyboardWindow")
+                            || view.getClass().getName().endsWith(".MiniAppKeyboardWindow"))) {
                         L.d("密码键盘:" + ViewUtils.getViewInfo(view)
                                 + " shown: " + ViewUtils.isShown(view)
                                 + " shownInScreen: " + ViewUtils.isShownInScreen(view)
@@ -87,19 +82,6 @@ public class WeChatPayDialog {
                     return null;
                 }
 
-                payDialog.usePasswordText = (TextView) com.surcumference.fingerprint.util.ViewUtils.findViewByText(rootView,
-                        "使用密码", "使用密碼", "Password",
-                        "使用指纹", "使用指紋", "Fingerprint");
-                L.d("payDialog.usePasswordText", payDialog.usePasswordText); // 6.5.16 app:id/dh0
-                if (payDialog.usePasswordText == null) {
-                    //ignore 没有开通指纹支付不会出现
-                }
-
-                payDialog.titleTextView = (TextView) com.surcumference.fingerprint.util.ViewUtils.findViewByText(rootView,
-                        "请验证指纹", "請驗證指紋", "Verify fingerprint",
-                        "　请验证指纹　", "　請驗證指紋　", "　Verify fingerprint　",
-                        "请输入支付密码", "請輸入付款密碼", "Enter payment password");
-                L.d("payDialog.titleTextView", payDialog.titleTextView); // 6.5.16 app:id/dgz
                 return payDialog;
             } catch (Exception e) {
                 L.e(e);
@@ -113,8 +95,6 @@ public class WeChatPayDialog {
                     "passwordLayout=" + passwordLayout +
                     ", inputEditText=" + inputEditText +
                     ", keyboardView=" + keyboardViews +
-                    ", usePasswordText=" + usePasswordText +
-                    ", titleTextView=" + titleTextView +
                     '}';
         }
     }

@@ -1,0 +1,21 @@
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    def apkDirectory = variant.artifacts.get(rootProject.androidApkArtifact)
+    tasks.register("export${variant.name.capitalize()}Payload") {
+        dependsOn(apkDirectory)
+        inputs.dir(apkDirectory)
+        def payloadFile = layout.buildDirectory.file("outputs/payload/${variant.name}/payload.apk")
+        outputs.file(payloadFile)
+        doLast {
+            def apks = fileTree(apkDirectory.get().asFile).matching { include '*.apk' }.files
+            if (apks.size() != 1) throw new GradleException('Expected one APK for native module payload')
+            def payload = payloadFile.get().asFile
+            payload.parentFile.mkdirs()
+            java.nio.file.Files.copy(apks.first().toPath(), payload.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            new java.util.zip.ZipFile(payload).withCloseable { zip ->
+                if (!zip.getEntry('classes.dex') || !zip.getEntry('assets/PublicSuffixDatabase.list')) {
+                    throw new GradleException('Module payload is missing DEX or OkHttp public suffix data')
+                }
+            }
+        }
+    }
+}

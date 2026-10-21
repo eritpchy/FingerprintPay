@@ -1,6 +1,4 @@
 <resources>
     <string name="app_name">指纹支付</string>
     <string name="app_description">让带指纹的手机支持微信、QQ、支付宝和淘宝的指纹支付</string>
-    <string name="generic_settings">通用设置</string>
-    <string name="settings_title_show_icon">显示应用图标</string>
 </resources>

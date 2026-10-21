@@ -3,13 +3,12 @@ package com.surcumference.fingerprint.plugin.impl.qq;
 import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_QQ;
 
 import android.app.Activity;
+import com.surcumference.fingerprint.util.PaymentPasswordGuard;
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.text.TextUtils;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -33,14 +32,14 @@ import com.surcumference.fingerprint.util.Config;
 import com.surcumference.fingerprint.util.DpUtils;
 import com.surcumference.fingerprint.util.KeyboardUtils;
 import com.surcumference.fingerprint.util.QQUtils;
-import com.surcumference.fingerprint.util.StyleUtils;
 import com.surcumference.fingerprint.util.Task;
+import com.surcumference.fingerprint.util.PaymentController;
+import com.surcumference.fingerprint.util.ActivityContext;
+import android.os.SystemClock;
 import com.surcumference.fingerprint.util.ViewUtils;
 import com.surcumference.fingerprint.util.XBiometricIdentify;
-import com.surcumference.fingerprint.util.drawable.XDrawable;
 import com.surcumference.fingerprint.util.log.L;
 import com.surcumference.fingerprint.util.paydialog.QQPayDialog;
-import com.surcumference.fingerprint.view.SettingsView;
 import com.wei.android.lib.fingerprintidentify.bean.FingerprintIdentifyFailInfo;
 
 import java.util.ArrayList;
@@ -48,6 +47,8 @@ import java.util.List;
 import java.util.WeakHashMap;
 
 public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
+    private boolean mFingerprintIdentifyTemporaryBlocking;
+
 
     private static final String TAG_FINGER_PRINT_IMAGE = "FINGER_PRINT_IMAGE";
     private static final String TAG_PASSWORD_EDITTEXT = "TAG_PASSWORD_EDITTEXT";
@@ -58,10 +59,12 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
     protected static final int QQ_VERSION_CODE_8_8_83 = 2654;
 
     private XBiometricIdentify mFingerprintIdentify;
-    private LinearLayout mMenuItemLLayout;
 
     protected boolean mMockCurrentUser = false;
     private Activity mCurrentPayActivity;
+    private final PaymentController mPayment = new PaymentController();
+    private Activity mWatchingActivity;
+    private long mWatchGeneration;
     private boolean mFingerprintScanStateReady = false;
     private WeakHashMap<Activity, String> mActivityPayMap = new WeakHashMap<>();
     private WeakHashMap<Activity, String> mActivityResumeMap = new WeakHashMap<>();
@@ -79,18 +82,6 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
 
     @Override
     public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {
-        L.d("activity", activity);
-        try {
-            final String activityClzName = activity.getClass().getName();
-            if (BuildConfig.DEBUG) {
-                L.d("activity", activity, "clz", activityClzName);
-            }
-            if (activityClzName.contains(".QQSettingSettingActivity")) {
-                Task.onMain(100, () -> doSettingsMenuInject(activity));
-            }
-        } catch (Exception e) {
-            L.e(e);
-        }
     }
 
     @Override
@@ -111,18 +102,28 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
             if (activityClzName.contains(".QWalletPluginProxyActivity")
                     || activityClzName.contains(".QWalletToolFragmentActivity")) {
                 L.d("found");
-                if (!Config.from(activity).isOn()) {
+                if (!Config.from(activity).isInScope()) {
                     return;
                 }
-                if (isActivityFirstResume(activity)) {
-                    markActivityResumed(activity);
-                    qqKeyboardFlashBugfixer(activity);
-                    qqKeyboardLazyBugfixer(activity);
-                    qqTitleBugfixer(activity);
-                } else if (isPayActivity(activity)) {
-                    qqKeyboardFlashBugfixer(activity);
+                if (Config.from(activity).isOn()) {
+                    if (isActivityFirstResume(activity)) {
+                        markActivityResumed(activity);
+                        qqKeyboardFlashBugfixer(activity);
+                        qqKeyboardLazyBugfixer(activity);
+                        qqTitleBugfixer(activity);
+                    } else if (isPayActivity(activity)) {
+                        qqKeyboardFlashBugfixer(activity);
+                    }
                 }
+                if (mPayment.isAuthenticating(activity) && mFingerprintIdentify != null
+                        && mFingerprintIdentify.isUsingBiometricApi()) return;
+                if (Config.from(activity).isUnderDisplayFingerprint() && mPayment.owner() == activity
+                        && mPayment.target() instanceof View && ((View) mPayment.target()).isShown()
+                        && ((View) mPayment.target()).getWindowToken() != null) return;
+                mPayment.close(mPayment.owner());
                 cancelFingerprintIdentify();
+                mWatchingActivity = activity;
+                ++mWatchGeneration;
                 initPayActivity(activity, 10, 100);
             }
         } catch (Exception e) {
@@ -132,6 +133,9 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
 
     @Override
     public void onActivityPaused(Activity activity) {
+        if (mPayment.isAuthenticating(activity) && mFingerprintIdentify != null
+                && mFingerprintIdentify.isUsingBiometricApi()) return;
+        closePayment(activity);
         try {
             final String activityClzName = activity.getClass().getName();
             if (BuildConfig.DEBUG) {
@@ -151,7 +155,7 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
 
     @Override
     public void onActivityStopped(@NonNull Activity activity) {
-        //Xposed not hooked yet!
+        closePayment(activity);
     }
 
     @Override
@@ -161,7 +165,7 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
 
     @Override
     public void onActivityDestroyed(@NonNull Activity activity) {
-        //Xposed not hooked yet!
+        closePayment(activity);
     }
 
     @Override
@@ -175,14 +179,12 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
     }
 
     private synchronized void initPayActivity(Activity activity, int retryDelay, int retryCountdown) {
+        if (mFingerprintIdentifyTemporaryBlocking) return;
+        if (mWatchingActivity != activity || !ActivityContext.isAlive(activity)) return;
+        final long watchGeneration = mWatchGeneration;
         Context context = activity;
         Config config = Config.from(context);
         String passwordEncrypted = config.getPasswordEncrypted();
-        if (TextUtils.isEmpty(passwordEncrypted) || TextUtils.isEmpty(config.getPasswordIV())) {
-            Toaster.showLong(Lang.getString(R.id.toast_password_not_set_qq));
-            return;
-        }
-
         ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView();
 
         QQPayDialog _payDialog = mActivityPayDialogMap.get(activity);
@@ -193,20 +195,45 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
         if (_payDialog == null) {
             if (retryCountdown > 0) {
                 Task.onMain(retryDelay, () -> {
-                    initPayActivity(activity, retryDelay, retryCountdown - 1);
+                    if (watchGeneration == mWatchGeneration) initPayActivity(activity, retryDelay, retryCountdown - 1);
                 });
             }
             return;
         }
         QQPayDialog payDialog = _payDialog;
+        if (!PaymentPasswordGuard.ready(config, payDialog.inputEditText)) return;
+        if (!mPayment.begin(activity, payDialog.inputEditText, SystemClock.uptimeMillis())) return;
+        final long[] paymentToken = {mPayment.token()};
+        mCurrentPayActivity = activity;
         boolean longPassword = payDialog.isLongPassword();
         ViewGroup editCon = longPassword ? (ViewGroup) payDialog.inputEditText.getParent().getParent().getParent()
                 : (ViewGroup) payDialog.inputEditText.getParent().getParent();
         setupPayWindowAttachListener(payDialog.inputEditText);
+        if (config.isUnderDisplayFingerprint()) {
+            mPayment.restoreWith(paymentToken[0], this::releaseFingerprintIdentify);
+            mPayment.bindToPaymentWindow(paymentToken[0], activity.getWindow(), config.isVolumeDownMonitorEnabled(), () -> {
+                mFingerprintIdentifyTemporaryBlocking = true;
+                Toaster.showLong(Lang.getString(R.id.toast_fingerprint_temporary_disabled));
+                Task.onBackground(60000, () -> mFingerprintIdentifyTemporaryBlocking = false);
+            });
+            mPayment.protectKeyboard(paymentToken[0], payDialog.keyboardView);
+            markAsPayActivity(activity);
+            initFingerPrintLock(context, passwordEncrypted, password -> {
+                if (!mPayment.isActive(paymentToken[0])) return;
+                try {
+                    payDialog.inputEditText.setText(password);
+                    if (longPassword && payDialog.okButton != null) payDialog.okButton.performClick();
+                } catch (Exception error) { L.e(error); }
+                mPayment.finish(paymentToken[0], SystemClock.uptimeMillis());
+            }, () -> mPayment.finish(paymentToken[0], SystemClock.uptimeMillis()));
+            return;
+        }
         View fingerprintView = prepareFingerprintView(context);
         int versionCode = getVersionCode(context);
 
         Runnable switchToPwdRunnable = () -> {
+            if (!mPayment.owns(paymentToken[0])) return;
+            mPayment.finish(paymentToken[0], SystemClock.uptimeMillis());
             if (activity != mCurrentPayActivity) {
                 return;
             }
@@ -244,6 +271,18 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
         };
 
         Runnable switchToFingerprintRunnable = () -> {
+            if (!ActivityContext.isAlive(activity) || payDialog.inputEditText.getWindowToken() == null) return;
+            if (mPayment.isAuthenticating(activity) && mFingerprintIdentify != null) return;
+            if (!mPayment.isActive(paymentToken[0])) {
+                mPayment.restart(activity, payDialog.inputEditText);
+                paymentToken[0] = mPayment.token();
+            }
+            mPayment.capture(editCon, payDialog.keyboardView, payDialog.titleTextView,
+                    payDialog.usePasswordText, payDialog.okButton, payDialog.withdrawTitleTextView);
+            mPayment.restoreWith(paymentToken[0], () -> {
+                releaseFingerprintIdentify();
+                fingerprintView.setVisibility(View.GONE);
+            });
             if (activity != mCurrentPayActivity) {
                 return;
             }
@@ -258,7 +297,7 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
                 if (payDialog.keyboardView.getVisibility() != View.INVISIBLE) {
                     payDialog.keyboardView.setVisibility(View.INVISIBLE);
                     //fix切换支付方式后键盘会出现
-                    Task.onMain(1000, () -> {
+                    mPayment.later(paymentToken[0], 1000, () -> {
                         if (mFingerprintScanStateReady) {
                             payDialog.keyboardView.setVisibility(View.INVISIBLE);
                         }
@@ -283,7 +322,14 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
             if (payDialog.withdrawTitleTextView != null) {
                 payDialog.withdrawTitleTextView.setText("使用指纹验证身份");
             }
-            resumeFingerprintIdentify();
+            initFingerPrintLock(context, passwordEncrypted, password -> {
+                if (!mPayment.isActive(paymentToken[0])) return;
+                try {
+                    payDialog.inputEditText.setText(password);
+                    if (longPassword && mPayment.isActive(paymentToken[0]) && payDialog.okButton != null) payDialog.okButton.performClick();
+                } catch (Exception error) { L.e(error); }
+                mPayment.finish(paymentToken[0], SystemClock.uptimeMillis());
+            }, switchToPwdRunnable);
         };
 
         fingerprintView.setOnClickListener(v -> {
@@ -312,17 +358,14 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
         }
 
         mCurrentPayActivity = activity;
-        initFingerPrintLock(context, passwordEncrypted, (password) -> { // success
-            payDialog.inputEditText.setText(password);
-            if (longPassword) {
-                payDialog.okButton.performClick();
-            }
-        }, switchToPwdRunnable /** fail */);
+
 
         markAsPayActivity(activity);
         switchToFingerprintRunnable.run();
         for (int i = 10; i < 500; i += 20) {
-            Task.onMain(i, switchToFingerprintRunnable);
+            mPayment.later(paymentToken[0], i, () -> {
+                if (mPayment.isAuthenticating(activity)) payDialog.keyboardView.setVisibility(View.INVISIBLE);
+            });
         }
     }
 
@@ -381,154 +424,47 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
     public void initFingerPrintLock(final Context context, String passwordEncrypted,
                                     OnFingerprintVerificationOKListener onSuccessUnlockCallback, final Runnable onFailureUnlockCallback) {
         L.d("initFingerPrintLock");
-        cancelFingerprintIdentify();
-        mFingerprintIdentify = new BizBiometricIdentify(context)
-                .withMockCurrentUserCallback(this)
-                .decryptPasscode(passwordEncrypted, new BizBiometricIdentify.IdentifyListener() {
+        final long token = mPayment.token();
+        if (!mPayment.isActive(token)) return;
+        if (mFingerprintIdentify != null) mFingerprintIdentify.cancelIdentify();
+        BizBiometricIdentify authentication = new BizBiometricIdentify(context).withMockCurrentUserCallback(this);
+        mFingerprintIdentify = authentication;
+        mPayment.authentication(token, authentication);
+        authentication.decryptPasscode(passwordEncrypted, new BizBiometricIdentify.IdentifyListener() {
 
                     @Override
                     public void onDecryptionSuccess(BizBiometricIdentify identify, @NonNull String decryptedContent) {
                         super.onDecryptionSuccess(identify, decryptedContent);
-                        onSuccessUnlockCallback.onFingerprintVerificationOK(decryptedContent);
+                        if (mPayment.authenticated(token)) onSuccessUnlockCallback.onFingerprintVerificationOK(decryptedContent);
                     }
 
                     @Override
                     public void onFailed(BizBiometricIdentify target, FingerprintIdentifyFailInfo failInfo) {
                         super.onFailed(target, failInfo);
-                        onFailureUnlockCallback.run();
+                        if (mPayment.owns(token)) onFailureUnlockCallback.run();
                     }
                 });
     }
 
+    private void closePayment(Activity activity) {
+        if (mPayment.owner() == activity) releaseFingerprintIdentify();
+        mPayment.close(activity);
+        if (mWatchingActivity == activity) { mWatchingActivity = null; ++mWatchGeneration; }
+        if (mCurrentPayActivity == activity) mCurrentPayActivity = null;
+        mActivityPayDialogMap.remove(activity);
+    }
+
     private void cancelFingerprintIdentify() {
+        mPayment.finish(mPayment.token(), SystemClock.uptimeMillis());
         L.d("cancelFingerprintIdentify");
-        XBiometricIdentify fingerprintIdentify = mFingerprintIdentify;
-        if (fingerprintIdentify == null) {
-            return;
-        }
-        if (!fingerprintIdentify.fingerprintScanStateReady) {
-            return;
-        }
-        fingerprintIdentify.cancelIdentify();
+        releaseFingerprintIdentify();
     }
 
-    private void resumeFingerprintIdentify() {
-        L.d("resumeFingerprintIdentify");
-        XBiometricIdentify fingerprintIdentify = mFingerprintIdentify;
-        if (fingerprintIdentify == null) {
-            return;
-        }
-        if (fingerprintIdentify.fingerprintScanStateReady) {
-            return;
-        }
-        fingerprintIdentify.resumeIdentify();
-    }
-
-    private void doSettingsMenuInject(final Activity activity) {
-        boolean isDarkMode = StyleUtils.isDarkMode(activity);
-        Context context = activity;
-        int versionCode = getVersionCode(context);
-        ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView();
-        View itemView = ViewUtils.findViewByText(rootView, "帐号管理");
-        View aboutView = versionCode >= QQ_VERSION_CODE_8_8_83 ?
-                ViewUtils.findViewByText(rootView, "关于QQ与帮助") : itemView;
-        LinearLayout linearLayout = (LinearLayout) itemView.getParent().getParent().getParent();
-        linearLayout.setPadding(0, 0, 0, 0);
-        List<ViewGroup.LayoutParams> childViewParamsList = new ArrayList<>();
-        List<View> childViewList = new ArrayList<>();
-        int childViewCount = linearLayout.getChildCount();
-        for (int i = 0; i < childViewCount; i++) {
-            View view = linearLayout.getChildAt(i);
-            childViewList.add(view);
-            childViewParamsList.add(view.getLayoutParams());
-        }
-
-        linearLayout.removeAllViews();
-
-        View lineTopView = new View(activity);
-        lineTopView.setBackgroundColor(Color.TRANSPARENT);
-
-        LinearLayout itemHlinearLayout = new LinearLayout(activity);
-        itemHlinearLayout.setOrientation(LinearLayout.HORIZONTAL);
-        itemHlinearLayout.setWeightSum(1);
-        itemHlinearLayout.setBackground(new XDrawable.Builder().defaultColor(isDarkMode? Color.BLACK : Color.WHITE).create());
-        itemHlinearLayout.setGravity(Gravity.CENTER_VERTICAL);
-        itemHlinearLayout.setClickable(true);
-        itemHlinearLayout.setOnClickListener(view -> new SettingsView(activity).showInDialog());
-
-        int defHPadding = DpUtils.dip2px(activity, 16);
-
-        TextView itemNameText = new TextView(activity);
-        StyleUtils.apply(itemNameText);
-        itemNameText.setGravity(Gravity.CENTER_VERTICAL);
-        itemNameText.setText(Lang.getString(R.id.app_settings_name));
-        itemNameText.setPadding(defHPadding, 0, 0, 0);
-        itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_BIG);
-
-        TextView itemSummerText = new TextView(activity);
-        StyleUtils.apply(itemSummerText);
-        itemSummerText.setText(BuildConfig.VERSION_NAME);
-        itemSummerText.setGravity(Gravity.CENTER_VERTICAL);
-        itemSummerText.setPadding(0, 0, defHPadding, 0);
-        itemSummerText.setTextColor(0xFF888888);
-
-        //try use QQ style
-        try {
-            View settingsView = aboutView;
-            if (settingsView instanceof TextView) {
-                TextView settingsTextView = (TextView) settingsView;
-                float scale = itemNameText.getTextSize() / settingsTextView.getTextSize();
-                itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_PX, settingsTextView.getTextSize());
-                itemSummerText.setTextSize(TypedValue.COMPLEX_UNIT_PX, itemSummerText.getTextSize() / scale);
-                itemNameText.setTextColor(settingsTextView.getCurrentTextColor());
-            }
-            View settingsItemView = (View)settingsView.getParent();
-            if (settingsItemView != null) {
-                Drawable background = settingsItemView.getBackground();
-                if (background != null) {
-                    Drawable.ConstantState constantState = background.getConstantState();
-                    if (constantState != null) {
-                        itemHlinearLayout.setBackground(constantState.newDrawable());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            L.e(e);
-        }
-
-        itemHlinearLayout.addView(itemNameText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        itemHlinearLayout.addView(itemSummerText, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        View lineBottomView = new View(activity);
-        lineBottomView.setBackgroundColor(Color.TRANSPARENT);
-
-        LinearLayout menuItemLLayout = mMenuItemLLayout;
-        if (menuItemLLayout == null) {
-            menuItemLLayout = new LinearLayout(context);
-            mMenuItemLLayout = menuItemLLayout;
-        } else {
-            ViewUtils.removeFromSuperView(menuItemLLayout);
-            menuItemLLayout.removeAllViews();
-        }
-
-        menuItemLLayout.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1);
-        lineParams.topMargin = DpUtils.dip2px(activity, 20);
-        menuItemLLayout.addView(lineTopView, lineParams);
-        int menuItemHeight = DpUtils.dip2px(activity, versionCode >= QQ_VERSION_CODE_8_8_83 ? 56 : 45);
-        menuItemLLayout.addView(itemHlinearLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, menuItemHeight));
-        lineParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1);
-        menuItemLLayout.addView(lineBottomView, lineParams);
-
-        linearLayout.addView(menuItemLLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        for (int i = 0; i < childViewCount; i++) {
-            View view = childViewList.get(i);
-            if (view == menuItemLLayout) {
-                continue;
-            }
-            ViewGroup.LayoutParams params = childViewParamsList.get(i);
-            linearLayout.addView(view, params);
-        }
+    private void releaseFingerprintIdentify() {
+        XBiometricIdentify identify = mFingerprintIdentify;
+        mFingerprintIdentify = null;
+        mFingerprintScanStateReady = false;
+        if (identify != null) identify.cancelIdentify();
     }
 
     /**
@@ -536,6 +472,7 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
      * @param activity
      */
     private void qqTitleBugfixer(Activity activity) {
+        if (Config.from(activity).isUnderDisplayFingerprint()) return;
         View titleView = ViewUtils.findViewByName(activity, "android", "title");
         ViewGroup contentView = (ViewGroup) ViewUtils.findViewByName(activity, "android", "content");
         if (titleView != null && contentView != null){
@@ -562,6 +499,7 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
      * @param activity
      */
     private void qqKeyboardFlashBugfixer(Activity activity) {
+        if (Config.from(activity).isUnderDisplayFingerprint()) return;
         View rootView = activity.getWindow().getDecorView();
         rootView.setAlpha(0);
         Task.onMain(200, () -> rootView.animate().alpha(1).start());
@@ -573,6 +511,7 @@ public class QQBasePlugin_8_2_11 implements IAppPlugin, IMockCurrentUser {
      * @param activity
      */
     private void qqKeyboardLazyBugfixer(Activity activity) {
+        if (Config.from(activity).isUnderDisplayFingerprint()) return;
         activity.getWindow().getDecorView().getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
             @Override
             public void onGlobalLayout() {

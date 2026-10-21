@@ -4,51 +4,40 @@ import static com.surcumference.fingerprint.Constant.ICON_ALIPAY_SETTING_ENTRY_B
 import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_ALIPAY;
 
 import android.app.Activity;
+import com.surcumference.fingerprint.util.PaymentPasswordGuard;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.graphics.Color;
 import android.os.*;
 import android.text.TextUtils;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.EditText;
-import android.widget.FrameLayout;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.ListView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.hjq.toast.Toaster;
-import com.surcumference.fingerprint.BuildConfig;
 import com.surcumference.fingerprint.Lang;
 import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.bean.DigitPasswordKeyPadInfo;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
 import com.surcumference.fingerprint.plugin.inf.OnFingerprintVerificationOKListener;
-import com.surcumference.fingerprint.util.ActivityViewObserver;
-import com.surcumference.fingerprint.util.ActivityViewObserverHolder;
+import com.surcumference.fingerprint.util.ActivityContext;
+import com.surcumference.fingerprint.util.DigitKeyResolver;
+import com.surcumference.fingerprint.util.PaymentController;
 import com.surcumference.fingerprint.util.AlipayVersionControl;
 import com.surcumference.fingerprint.util.ApplicationUtils;
 import com.surcumference.fingerprint.util.BizBiometricIdentify;
 import com.surcumference.fingerprint.util.BlackListUtils;
 import com.surcumference.fingerprint.util.Config;
-import com.surcumference.fingerprint.util.DpUtils;
-import com.surcumference.fingerprint.util.ImageUtils;
-import com.surcumference.fingerprint.util.StyleUtils;
 import com.surcumference.fingerprint.util.Task;
 import com.surcumference.fingerprint.util.ViewUtils;
 import com.surcumference.fingerprint.util.XBiometricIdentify;
-import com.surcumference.fingerprint.util.drawable.XDrawable;
 import com.surcumference.fingerprint.util.log.L;
 import com.surcumference.fingerprint.view.AlipayPayView;
 import com.surcumference.fingerprint.view.DialogUtils;
-import com.surcumference.fingerprint.view.SettingsView;
 import com.wei.android.lib.fingerprintidentify.bean.FingerprintIdentifyFailInfo;
 
 import java.util.ArrayList;
@@ -57,15 +46,20 @@ import java.util.List;
 public class AlipayBasePlugin implements IAppPlugin {
 
 
+
     private AlertDialog mFingerPrintAlertDialog;
-    private int mPwdActivityReShowDelayTimeMsec;
 
     private XBiometricIdentify mFingerprintIdentify;
     private Activity mCurrentActivity;
 
-    private boolean mIsViewTreeObserverFirst;
     private int mAlipayVersionCode;
-    private boolean mFingerprintIdentifyTemporaryBlocking = false;
+    private volatile boolean mFingerprintIdentifyTemporaryBlocking = false;
+    private final PaymentController mPaymentSession = new PaymentController();
+    private final Handler mInputHandler = new Handler(Looper.getMainLooper());
+    private View mLayoutRoot;
+    private ViewTreeObserver.OnGlobalLayoutListener mLayoutListener;
+    private String mPaymentCredential;
+    private boolean mPasswordRejected;
 
     @Override
     public int getVersionCode(Context context) {
@@ -78,38 +72,16 @@ public class AlipayBasePlugin implements IAppPlugin {
 
     @Override
     public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {
-        L.d("activity", activity);
-        try {
-            final String activityClzName = activity.getClass().getName();
-            if (BuildConfig.DEBUG) {
-                L.d("activity", activity, "clz", activityClzName);
-            }
-            int alipayVersionCode = getVersionCode(activity);
-            if (alipayVersionCode >= 773 /** 10.3.80.9100 */ && activityClzName.contains(".FBAppWindowActivity")) {
-                ActivityViewObserver activityViewObserver = new ActivityViewObserver(activity);
-                activityViewObserver.setViewIdentifyText("支付密码", "支付密碼", "Payment Password");
-                ActivityViewObserverHolder.start(ActivityViewObserverHolder.Key.AlipaySettingPageEntered,
-                        activityViewObserver, 100, (observer, view) -> doSettingsMenuInject_10_1_38(activity),
-                        30000);
-            } else if (activityClzName.contains(".MySettingActivity")) {
-                Task.onMain(100, () -> doSettingsMenuInject_10_1_38(activity));
-            } else if (activityClzName.contains(".UserSettingActivity")) {
-                Task.onMain(100, () -> doSettingsMenuInject(activity));
-            }
-        } catch (Exception e) {
-            L.e(e);
-        }
     }
 
     @Override
     public void onActivityPaused(Activity activity) {
-        //Xposed not hooked yet!
-        L.d("onActivityPaused", activity);
+        if (!isSystemAuthenticationShowing(activity)) closePayment(activity);
     }
 
     @Override
     public void onActivityStopped(@NonNull Activity activity) {
-        //Xposed not hooked yet!
+        closePayment(activity);
     }
 
     @Override
@@ -119,7 +91,7 @@ public class AlipayBasePlugin implements IAppPlugin {
 
     @Override
     public void onActivityDestroyed(@NonNull Activity activity) {
-        //Xposed not hooked yet!
+        closePayment(activity);
     }
 
     @Override
@@ -134,298 +106,227 @@ public class AlipayBasePlugin implements IAppPlugin {
 
     public void onActivityResumed(Activity activity) {
         try {
-            final String activityClzName = activity.getClass().getName();
-            if (BuildConfig.DEBUG) {
-                L.d("activity", activity, "clz", activityClzName);
-            }
+            if (mCurrentActivity != null && mCurrentActivity != activity) closePayment(mCurrentActivity);
             mCurrentActivity = activity;
-            if (activityClzName.contains(".PayPwdDialogActivity")
-                    || activityClzName.contains(".MspContainerActivity")
-                    || activityClzName.contains(".FlyBirdWindowActivity")) {
-                L.d("found");
-                final Config config = Config.from(activity);
-                if (!config.isOn()) {
-                    return;
-                }
-                if (mFingerprintIdentifyTemporaryBlocking) {
-                    return;
-                }
-                mIsViewTreeObserverFirst = true;
-                int versionCode = getVersionCode(activity);
-                View rootView = activity.getWindow().getDecorView();
-                rootView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-                    if (mCurrentActivity == null) {
-                        return;
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                        if (activity.isDestroyed()) {
-                            return;
-                        }
-                    }
-                    if (mCurrentActivity != activity) {
-                        return;
-                    }
-                    if (versionCode >= 661 /** 10.3.10.8310 */) {
-                        boolean isRechargePay = (ViewUtils.isShown(ViewUtils.findViewByName(activity, "com.alipay.android.phone.mobilecommon.verifyidentity", "input_et_password"))
-                                && ViewUtils.isShown(ViewUtils.findViewByName(activity, "com.alipay.android.phone.mobilecommon.verifyidentity", "keyboard_container")));
-
-                        boolean isNormalPay = ViewUtils.isShown(ViewUtils.findViewByText(rootView,"请输入长密码", "請輸入長密碼", "Payment Password"))
-                                || ViewUtils.isShown(ViewUtils.findViewByText(rootView,"密码共6位，已输入0位"));
-
-                        boolean isKeyAreaPay = ViewUtils.isShown(ViewUtils.findViewByName(activity, "com.alipay.android.phone.mobilecommon.verifyidentity", "ll_key_area"));
-
-                        if (isRechargePay || isNormalPay || isKeyAreaPay) {
-                            if (mIsViewTreeObserverFirst) {
-                                if (showFingerPrintDialog(activity)) {
-                                    mIsViewTreeObserverFirst = false;
-                                }
-                            }
-                            return;
-                        }
-                        return;
-                    }
-                    if (ViewUtils.findViewByName(activity, (versionCode >= 352 /** 10.2.13.7000 */ ? "com.alipay.android.safepaysdk" : "com.alipay.android.app"), "simplePwdLayout") == null
-                            && ViewUtils.findViewByName(activity, "com.alipay.android.phone.safepaybase", "mini_linSimplePwdComponent") == null
-                            && ViewUtils.findViewByName(activity, "com.alipay.android.phone.safepaysdk", "mini_linSimplePwdComponent") == null
-                            && ViewUtils.findViewByName(activity, "com.alipay.android.phone.mobilecommon.verifyidentity", "input_et_password") == null ) {
-                        return;
-                    }
-                    if (mIsViewTreeObserverFirst) {
-                        mIsViewTreeObserverFirst = false;
+            String name = activity.getClass().getName();
+            if (!(name.contains(".PayPwdDialogActivity") || name.contains(".PayPwdFullActivity")
+                    || name.contains(".MspContainerActivity") || name.contains(".FlyBirdWindowActivity")
+                    || name.contains("PayPwdHalfActivity"))) return;
+            View root = activity.getWindow().getDecorView();
+            removeLayoutListener();
+            mLayoutRoot = root;
+            mLayoutListener = () -> {
+                try {
+                    if (ActivityContext.isAlive(activity) && mCurrentActivity == activity) {
+                        if (mPaymentSession.isActive(mPaymentSession.token()))
+                            protectPaymentKeyboard(activity, mPaymentSession.token());
                         showFingerPrintDialog(activity);
                     }
-                });
-
-            } else if (activityClzName.contains("PayPwdHalfActivity")) {
-                L.d("found");
-                final Config config = Config.from(activity);
-                if (!config.isOn()) {
-                    return;
+                } catch (Exception e) {
+                    L.e("Alipay payment detection failed", e);
+                    restorePassword(mPaymentSession.token());
                 }
-                if (mFingerprintIdentifyTemporaryBlocking) {
-                    return;
-                }
-                Task.onMain(1500, () -> {
-                    int versionCode = getVersionCode(activity);
-                    DigitPasswordKeyPadInfo digitPasswordKeyPad = AlipayVersionControl.getDigitPasswordKeyPad(versionCode);
-                    View key1View = ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key1);
-                    if (key1View != null) {
-                        showFingerPrintDialog(activity);
-                        return;
-                    }
-
-                    //try again
-                    Task.onMain(2000, () -> showFingerPrintDialog(activity));
-                });
-            }
+            };
+            root.getViewTreeObserver().addOnGlobalLayoutListener(mLayoutListener);
+            mLayoutListener.onGlobalLayout();
         } catch (Exception e) {
-            L.e(e);
+            L.e("Alipay payment detection failed", e);
+            restorePassword(mPaymentSession.token());
         }
     }
 
-    public void initFingerPrintLock(final Context context ,AlertDialog dialog, String passwordEncrypted,
-                                    OnFingerprintVerificationOKListener onSuccessUnlockCallback) {
-        mFingerprintIdentify = new BizBiometricIdentify(context)
-                .decryptPasscode(passwordEncrypted, new BizBiometricIdentify.IdentifyListener() {
+    public void initFingerPrintLock(final Context context, AlertDialog dialog, String encrypted,
+                                    OnFingerprintVerificationOKListener onSuccess) {
+        final long token = mPaymentSession.token();
+        Activity activity = ActivityContext.find(context);
+        if (activity == null || !mPaymentSession.isActive(token)) {
+            restorePassword(token);
+            return;
+        }
+        BizBiometricIdentify identify = new BizBiometricIdentify(activity);
+        mFingerprintIdentify = identify;
+        mPaymentSession.authentication(token, identify);
+        identify.decryptPasscode(encrypted, new BizBiometricIdentify.IdentifyListener() {
+            @Override
+            public void onInited(BizBiometricIdentify identify) {
+                ViewUtils.setAlpha(dialog, identify.isUsingBiometricApi() ? 0 : 1);
+                ViewUtils.setDimAmount(dialog, identify.isUsingBiometricApi() ? 0 : 0.6f);
+            }
 
-                    @Override
-                    public void onInited(BizBiometricIdentify identify) {
-                        super.onInited(identify);
-                        if (identify.isUsingBiometricApi()) {
-                            ViewUtils.setAlpha(dialog, 0);
-                            ViewUtils.setDimAmount(dialog, 0);
-                        } else {
-                            ViewUtils.setAlpha(dialog, 1);
-                            ViewUtils.setDimAmount(dialog, 0.6f);
-                        }
-                    }
+            @Override
+            public void onDecryptionSuccess(BizBiometricIdentify identify, @NonNull String password) {
+                if (!mPaymentSession.authenticated(token)) return;
+                try {
+                    onSuccess.onFingerprintVerificationOK(password);
+                } catch (Exception e) {
+                    L.e("Alipay password input failed", e);
+                    restorePassword(token);
+                }
+            }
 
-                    @Override
-                    public void onDecryptionSuccess(BizBiometricIdentify identify, @NonNull String decryptedContent) {
-                        super.onDecryptionSuccess(identify, decryptedContent);
-                        onSuccessUnlockCallback.onFingerprintVerificationOK(decryptedContent);
-                    }
-
-                    @Override
-                    public void onFailed(BizBiometricIdentify target, FingerprintIdentifyFailInfo failInfo) {
-                        super.onFailed(target, failInfo);
-                        if (dialog != null) {
-                            ViewUtils.setAlpha(dialog, 1);
-                            ViewUtils.setDimAmount(dialog, 0.6f);
-                            if (dialog.isShowing()) {
-                                dialog.dismiss();
-                            }
-                        }
-                    }
-                });
+            @Override
+            public void onFailed(BizBiometricIdentify identify, FingerprintIdentifyFailInfo info) {
+                if (mPaymentSession.isActive(token)) restorePassword(token);
+            }
+        });
     }
 
     public boolean showFingerPrintDialog(final Activity activity) {
-        final Context context = activity;
-        final Config config = Config.from(context);
-        try {
-            if (getVersionCode(activity) >= 224) {
-                if (activity.getClass().getName().contains(".MspContainerActivity")) {
-                    View payTextView = ViewUtils.findViewByText(activity.getWindow().getDecorView(),
-                            "支付宝支付密码", "支付寶支付密碼", "Alipay Payment Password",
-                            "请输入支付密码", "請輸入支付密碼", "Payment password",
-                            "请输入长密码", "請輸入長密碼", "密码共6位，已输入0位");
-                    L.d("payTextView", payTextView);
-                    if (payTextView == null) {
-                        return false;
-                    }
+        if (!ActivityContext.isAlive(activity) || mCurrentActivity != activity
+                || mFingerprintIdentifyTemporaryBlocking) return false;
+        Config config = Config.from(activity);
+        String encrypted = config.getPasswordEncrypted();
+        boolean rejected = PaymentPasswordGuard.hasPasswordError(activity.getWindow().getDecorView());
+        View target = rejected ? null : findPasswordTarget(activity);
+        if (rejected && !mPasswordRejected) PaymentPasswordGuard.rejected(mPaymentSession.target() instanceof View
+                ? (View) mPaymentSession.target() : activity.getWindow().getDecorView());
+        if (!rejected && !PaymentPasswordGuard.ready(config, target)) return false;
+        if (!beginPasswordStage(activity, target, encrypted, rejected)) return false;
+        final long token = mPaymentSession.token();
+        mPaymentSession.restoreWith(token, () -> restorePassword(token));
+        target.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View view) {}
+            @Override public void onViewDetachedFromWindow(View view) {
+                view.removeOnAttachStateChangeListener(this);
+                if (mPaymentSession.owns(token)) {
+                    restorePassword(token);
+                    mPaymentSession.close(activity);
                 }
             }
-
-            hidePreviousPayDialog();
-            String passwordEncrypted = config.getPasswordEncrypted();
-            if (TextUtils.isEmpty(passwordEncrypted) || TextUtils.isEmpty(config.getPasswordIV())) {
-                Toaster.showLong(Lang.getString(R.id.toast_password_not_set_alipay));
+        });
+        try {
+            OnFingerprintVerificationOKListener onSuccess = password -> {
+                BlackListUtils.applyIfNeeded(activity);
+                focusPasswordTarget(activity, token);
+                clickDigitPasswordWidget(activity);
+                protectPaymentKeyboard(activity, token);
+                inputPassword(activity, password, token, SystemClock.uptimeMillis() + 6000);
+            };
+            mPaymentSession.bindToPaymentWindow(token, activity.getWindow(), config.isVolumeDownMonitorEnabled(), () -> {
+                mFingerprintIdentifyTemporaryBlocking = true;
+                Toaster.showLong(Lang.getString(R.id.toast_fingerprint_temporary_disabled));
+                Task.onBackground(60000, () -> mFingerprintIdentifyTemporaryBlocking = false);
+            });
+            protectPaymentKeyboard(activity, token);
+            if (config.isUnderDisplayFingerprint()) {
+                initFingerPrintLock(activity, null, encrypted, onSuccess);
                 return true;
             }
-
-            mPwdActivityReShowDelayTimeMsec = 0;
-            clickDigitPasswordWidget(activity);
-            reEnteredPayDialogSolution(activity);
-            AlipayPayView alipayPayView = new AlipayPayView(context)
-                .withOnShowListener((target) -> {
-                    AlertDialog dialog = target.getDialog();
-                    initFingerPrintLock(context, dialog, passwordEncrypted, (password) -> {
-                        BlackListUtils.applyIfNeeded(context);
-                        Runnable onCompleteRunnable = () -> {
-                            mPwdActivityReShowDelayTimeMsec = 1000;
-                            DialogUtils.dismiss(mFingerPrintAlertDialog);
-                        };
-
-                        if (!tryInputGenericPassword(activity, password)) {
-                            boolean tryAgain = false;
-                            try {
-                                inputDigitPassword(activity, password);
-                            } catch (NullPointerException e) {
-                                tryAgain = true;
-                            } catch (Exception e) {
-                                Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                                L.e(e);
-                            }
-                            if (tryAgain) {
-                                clickDigitPasswordWidget(activity);
-                                Task.onMain(1000, ()-> {
-                                    try {
-                                        inputDigitPassword(activity, password);
-                                    } catch (NullPointerException e) {
-                                        Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                                        L.d("inputDigitPassword NPE", e);
-                                    } catch (Exception e) {
-                                        Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                                        L.e(e);
-                                    }
-                                    onCompleteRunnable.run();
-                                });
-                                return;
-                            }
+            AlipayPayView view = new AlipayPayView(activity)
+                    .withOnShowListener(shown -> {
+                        if (!mPaymentSession.isActive(token)) return;
+                        initFingerPrintLock(activity, shown.getDialog(), encrypted, onSuccess);
+                        if (config.isVolumeDownMonitorEnabled() && mPaymentSession.isActive(token)) {
+                            ViewUtils.registerVolumeKeyDownEventListener(shown.getDialog().getWindow(), event -> {
+                                if (mFingerprintIdentifyTemporaryBlocking) return false;
+                                mFingerprintIdentifyTemporaryBlocking = true;
+                                restorePassword(token);
+                                Toaster.showLong(Lang.getString(R.id.toast_fingerprint_temporary_disabled));
+                                Task.onBackground(60000, () -> mFingerprintIdentifyTemporaryBlocking = false);
+                                return true;
+                            });
                         }
-                        onCompleteRunnable.run();
+                    }).withOnCancelButtonClickListener(shown -> restorePassword(token))
+                    .withOnDismissListener(shown -> {
+                        if (mPaymentSession.isActive(token)) restorePassword(token);
                     });
-                    // 无需反注册， 作用域仅限于Dialog Window
-                    if (config.isVolumeDownMonitorEnabled()) {
-                        ViewUtils.registerVolumeKeyDownEventListener(dialog.getWindow(), event -> {
-                            if (mFingerprintIdentifyTemporaryBlocking) {
-                                return false;
-                            }
-                            DialogUtils.dismiss(dialog);
-                            Toaster.showLong(Lang.getString(R.id.toast_fingerprint_temporary_disabled));
-                            mFingerprintIdentifyTemporaryBlocking = true;
-                            Task.onBackground(60000, () -> mFingerprintIdentifyTemporaryBlocking = false);
-                            return false;
-                        });
-                    }
-            }).withOnCancelButtonClickListener(target -> {
-                DialogUtils.dismiss(target.getDialog());
-            }).withOnDismissListener(v -> {
-                XBiometricIdentify fingerprintIdentify = mFingerprintIdentify;
-                if (fingerprintIdentify != null) {
-                    fingerprintIdentify.cancelIdentify();
+            AlertDialog dialog = view.showInDialog();
+            if (mPaymentSession.isActive(token)) {
+                mFingerPrintAlertDialog = dialog;
+                if (mFingerprintIdentify != null && mFingerprintIdentify.isUsingBiometricApi()) {
+                    ViewUtils.setAlpha(dialog, 0);
+                    ViewUtils.setDimAmount(dialog, 0);
                 }
-            });
-            AlertDialog fingerPrintAlertDialog = alipayPayView.showInDialog();
-            ViewUtils.setAlpha(fingerPrintAlertDialog, 0);
-            ViewUtils.setDimAmount(fingerPrintAlertDialog, 0);
-            mFingerPrintAlertDialog = fingerPrintAlertDialog;
-        } catch (OutOfMemoryError e) {
+            } else {
+                DialogUtils.dismiss(dialog);
+            }
+        } catch (Exception e) {
+            L.e("Unable to show Alipay authentication", e);
+            restorePassword(token);
         }
         return true;
     }
 
-    private void setupPaymentItemOnClickListener(ViewGroup rootView) {
-        List<View> paymentMethodsViewList = new ArrayList<>();
-        ViewUtils.getChildViewsByRegex(rootView, ".*选中,.+", paymentMethodsViewList);
-        long paymentMethodsViewListSize = paymentMethodsViewList.size();
-        for (int i = 0; i < paymentMethodsViewListSize; i++) {
-            View paymentMethodView = paymentMethodsViewList.get(i);
-            L.d("paymentMethodView", ViewUtils.getViewInfo(paymentMethodView));
-            // 只取第一次, 防止多次调用造成出错
-            View.OnClickListener originPaymentMethodListener = (View.OnClickListener) paymentMethodView.getTag(R.id.alipay_payment_method_item_click_listener);
-            if (originPaymentMethodListener == null) {
-                paymentMethodView.setTag(R.id.alipay_payment_method_item_click_listener, ViewUtils.getOnClickListener(paymentMethodView));
-            }
-            paymentMethodView.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    try {
-                        if (mFingerprintIdentifyTemporaryBlocking) {
-                            return;
-                        }
-                        AlertDialog dialog = mFingerPrintAlertDialog;
-                        if (dialog == null) {
-                            return;
-                        }
-                        if (!dialog.isShowing()) {
-                            dialog.show();
-                        }
-                    } finally {
-                        View.OnClickListener originPaymentMethodListener = (View.OnClickListener) v.getTag(R.id.alipay_payment_method_item_click_listener);
-                        if (originPaymentMethodListener != null && originPaymentMethodListener != this) {
-                            originPaymentMethodListener.onClick(v);
-                        }
-                    }
-                }
-            });
+    private boolean isSystemAuthenticationShowing(Activity activity) {
+        return mPaymentSession.isAuthenticating(activity) && mFingerprintIdentify != null
+                && mFingerprintIdentify.isUsingBiometricApi() && ActivityContext.isAlive(activity);
+    }
+
+    private void restorePassword(long token) {
+        if (!mPaymentSession.owns(token)) return;
+        mPaymentSession.finish(token, SystemClock.uptimeMillis());
+        mInputHandler.removeCallbacksAndMessages(null);
+        XBiometricIdentify identify = mFingerprintIdentify;
+        mFingerprintIdentify = null;
+        if (identify != null) identify.cancelIdentify();
+        hidePreviousPayDialog();
+    }
+
+    private void closePayment(Activity activity) {
+        if (mPaymentSession.owner() == activity) {
+            restorePassword(mPaymentSession.token());
+            mPaymentSession.close(activity);
+        }
+        if (mCurrentActivity == activity) {
+            mPaymentCredential = null;
+            mPasswordRejected = false;
+            removeLayoutListener();
+            mCurrentActivity = null;
         }
     }
 
-    private void reEnteredPayDialogSolution(Activity activity) {
-        int versionCode = getVersionCode(activity);
-        if (versionCode < 1261 /** 10.5.96.8000 */) {
-            return;
+    private boolean beginPasswordStage(Activity activity, View target, String credential, boolean rejected) {
+        if (rejected) {
+            if (!mPasswordRejected && mPaymentSession.owner() == null) mPaymentCredential = credential;
+            mPasswordRejected = true;
+            restorePassword(mPaymentSession.token());
+            return false;
         }
-        ViewGroup rootView = (ViewGroup)activity.getWindow().getDecorView();
-        setupPaymentItemOnClickListener(rootView);
-        // 在10s内寻找密码框
-        ActivityViewObserver activityViewObserver = new ActivityViewObserver(activity);
-        activityViewObserver.setActivityViewFinder(outViewList -> {
-            EditText view = findPasswordEditText(activity);
-            if (view != null) {
-                outViewList.add(view);
-            }
-            View shortPwdView = ViewUtils.findViewByText(rootView, "密码共6位，已输入0位");
-            if (ViewUtils.isShown(shortPwdView)) {
-                outViewList.add(shortPwdView);
-            }
-        });
-        ActivityViewObserverHolder.start(ActivityViewObserverHolder.Key.AlipayPasswordView,
-                activityViewObserver, 300, (observer, view) -> {
-                    ActivityViewObserverHolder.stop(observer);
-                    L.d("找到密码框", view);
-                    Object debounceToken = new Object();
-                    Handler debounceHandler = view.getHandler();
-                    view.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-                        debounceHandler.removeCallbacksAndMessages(debounceToken);
-                        debounceHandler.postAtTime(() -> {
-                            setupPaymentItemOnClickListener(rootView);
-                        }, debounceToken, SystemClock.uptimeMillis() + 666);
-                    });
-                },
-                10000);
+        Object previous = mPaymentSession.target();
+        boolean newCredential = (previous != null || mPasswordRejected)
+                && !TextUtils.equals(mPaymentCredential, credential);
+        boolean newTarget = previous != null && target != null && previous != target
+                && !mPaymentSession.isActive(mPaymentSession.token());
+        boolean leftStage = target == null && previous instanceof View
+                && (!((View) previous).isShown() || ((View) previous).getWindowToken() == null)
+                && !isSystemAuthenticationShowing(activity);
+        if (newCredential || newTarget || leftStage) {
+            mPaymentSession.close(activity);
+            mPasswordRejected = false;
+        }
+        if (target == null || mPasswordRejected
+                || !mPaymentSession.begin(activity, target, SystemClock.uptimeMillis())) return false;
+        mPaymentCredential = credential;
+        return true;
+    }
+
+    private void removeLayoutListener() {
+        if (mLayoutRoot != null && mLayoutListener != null && mLayoutRoot.getViewTreeObserver().isAlive()) {
+            if (Build.VERSION.SDK_INT >= 16) mLayoutRoot.getViewTreeObserver().removeOnGlobalLayoutListener(mLayoutListener);
+            else mLayoutRoot.getViewTreeObserver().removeGlobalOnLayoutListener(mLayoutListener);
+        }
+        mLayoutListener = null;
+        mLayoutRoot = null;
+    }
+
+    private View findPasswordTarget(Activity activity) {
+        View root = activity.getWindow().getDecorView();
+        View prompt = ViewUtils.findViewByText(root, "支付宝支付密码", "支付寶支付密碼", "Alipay Payment Password",
+                "请输入支付密码", "請輸入支付密碼", "Payment password", "请输入长密码", "請輸入長密碼",
+                "Payment Password", "密码共6位，已输入0位");
+        boolean hasPrompt = ViewUtils.isShown(prompt);
+        EditText edit = findPasswordEditText(activity);
+        if (edit != null && edit.isShown()) return edit;
+        for (String pkg : new String[]{"com.alipay.android.phone.mobilecommon.verifyidentity", "com.alipay.mobile.antui"}) {
+            View six = ViewUtils.findViewByName(root, pkg, "ap_six_number_pwd_input");
+            if (six != null && six.isShown()) return six;
+        }
+        View keyboard = findDigitKeyboard(activity);
+        if (keyboard == null) return null;
+        if (hasPrompt) return keyboard;
+        if (DigitKeyResolver.resolve(keyboard,
+                AlipayVersionControl.getDigitPasswordKeyPad(getVersionCode(activity)), "0123456789") == null) return null;
+        return com.surcumference.fingerprint.util.ShortPasswordTarget.find(root);
     }
 
     /**
@@ -442,316 +343,215 @@ public class AlipayBasePlugin implements IAppPlugin {
         ViewUtils.performActionClick(view);
     }
 
-    private void doSettingsMenuInject_10_1_38(final Activity activity) {
+    private void focusPasswordTarget(Activity activity, long token) {
+        if (!isInputCurrent(activity, token)) return;
+        View target = (View) mPaymentSession.target();
+        if (target != findDigitKeyboard(activity)) {
+            target.requestFocus();
+            target.performClick();
+        }
+    }
 
-        View lineTopView = new View(activity);
-        lineTopView.setBackgroundColor(0xFFEEEEEE);
-
-        LinearLayout itemHlinearLayout = new LinearLayout(activity);
-        itemHlinearLayout.setOrientation(LinearLayout.HORIZONTAL);
-        itemHlinearLayout.setWeightSum(1);
-        itemHlinearLayout.setBackground(new XDrawable.Builder().defaultColor(Color.WHITE).pressedColor(0xFFD9D9D9).create());
-        itemHlinearLayout.setGravity(Gravity.CENTER_VERTICAL);
-        itemHlinearLayout.setClickable(true);
-        itemHlinearLayout.setOnClickListener(view -> new SettingsView(activity).showInDialog());
-
-        TextView itemNameText = new TextView(activity);
-        StyleUtils.apply(itemNameText);
-        itemNameText.setText(Lang.getString(R.id.app_settings_name));
-        itemNameText.setGravity(Gravity.CENTER_VERTICAL);
-        itemNameText.setPadding(DpUtils.dip2px(activity, 12), 0, 0, 0);
-        itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_BIG);
-
-        TextView itemSummerText = new TextView(activity);
-        StyleUtils.apply(itemSummerText);
-        itemSummerText.setText(BuildConfig.VERSION_NAME);
-        itemSummerText.setGravity(Gravity.CENTER_VERTICAL);
-        itemSummerText.setPadding(0, 0, DpUtils.dip2px(activity, 18), 0);
-        itemSummerText.setTextColor(0xFF999999);
-        int versionCode = getVersionCode(activity);
-
-        //try use Alipay style
+    private void inputPassword(Activity activity, String password, long token, long deadline) {
+        if (!isInputCurrent(activity, token)) {
+            if (mPaymentSession.owns(token)) restorePassword(token);
+            return;
+        }
         try {
-            View settingsView = versionCode >= 773 /** 10.3.80.9100 */
-                    ? ViewUtils.findViewByText(activity.getWindow().getDecorView(), "支付密码", "支付密碼", "Payment Password")
-                    : ViewUtils.findViewByName(activity, "com.alipay.mobile.antui", "item_left_text");
-            L.d("settingsView", settingsView);
-            if (settingsView instanceof TextView) {
-                TextView settingsTextView = (TextView) settingsView;
-                float scale = itemNameText.getTextSize() / settingsTextView.getTextSize();
-                itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_PX, settingsTextView.getTextSize());
-                itemSummerText.setTextSize(TypedValue.COMPLEX_UNIT_PX, itemSummerText.getTextSize() / scale);
-                itemNameText.setTextColor(settingsTextView.getCurrentTextColor());
+            EditText edit = findPasswordEditText(activity);
+            View confirm = edit == null ? null : findConfirmPasswordBtn(edit, false);
+            if (edit != null && confirm != null) {
+                if (!edit.isEnabled()) {
+                    if (SystemClock.uptimeMillis() >= deadline) inputFailed(token);
+                    else mInputHandler.postDelayed(() -> inputPassword(activity, password, token, deadline), 100);
+                    return;
+                }
+                edit.requestFocus();
+                edit.setText(password);
+                mInputHandler.postDelayed(() -> confirmPassword(activity, edit, confirm, token, deadline), 100);
+                return;
             }
+            View keyboard = findDigitKeyboard(activity);
+            mPaymentSession.protectKeyboard(token, keyboard);
+            List<View> keys = DigitKeyResolver.resolve(keyboard,
+                    AlipayVersionControl.getDigitPasswordKeyPad(getVersionCode(activity)), password);
+            if (keys == null) {
+                if (SystemClock.uptimeMillis() >= deadline) {
+                    Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
+                    restorePassword(token);
+                } else {
+                    mInputHandler.postDelayed(() -> inputPassword(activity, password, token, deadline), 300);
+                }
+                return;
+            }
+            for (int i = 0; i < keys.size(); i++) {
+                View key = keys.get(i);
+                mInputHandler.postDelayed(() -> {
+                    if (!isInputCurrent(activity, token)) return;
+                    try {
+                        if (!key.isShown() || !key.isEnabled() || key.getWindowToken() == null) {
+                            restorePassword(token);
+                            return;
+                        }
+                        if (!ViewUtils.performActionClick(key)) restorePassword(token);
+                    } catch (Exception e) {
+                        L.e("Alipay keyboard input failed", e);
+                        restorePassword(token);
+                    }
+                }, i * 70L);
+            }
+            mInputHandler.postDelayed(() -> {
+                if (mPaymentSession.isActive(token)) restorePassword(token);
+            }, keys.size() * 70L + 100);
         } catch (Exception e) {
-            L.e(e);
-        }
-
-        if (versionCode >= 773 /** 10.3.80.9100 */) {
-        } else if (versionCode >= 661 /** 10.3.10.8310 */) {
-            ImageView itemIconImageView = new ImageView(activity);
-            itemIconImageView.setImageBitmap(ImageUtils.base64ToBitmap(ICON_ALIPAY_SETTING_ENTRY_BASE64));
-            LinearLayout.LayoutParams itemIconImageViewLayoutParams = new LinearLayout.LayoutParams(DpUtils.dip2px(activity, 24), DpUtils.dip2px(activity, 24));
-            itemIconImageViewLayoutParams.leftMargin = DpUtils.dip2px(activity, 12);
-            itemHlinearLayout.addView(itemIconImageView, itemIconImageViewLayoutParams);
-        }
-        itemHlinearLayout.addView(itemNameText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        itemHlinearLayout.addView(itemSummerText, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        View lineBottomView = new View(activity);
-        lineBottomView.setBackgroundColor(0xFFEEEEEE);
-
-        LinearLayout rootLinearLayout = new LinearLayout(activity);
-        rootLinearLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLinearLayout.addView(lineTopView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1);
-
-        if (versionCode >= 661 /** 10.3.10.8310 */) {
-            lineTopView.setVisibility(View.INVISIBLE);
-            itemHlinearLayout.setBackground(new XDrawable.Builder().defaultColor(Color.WHITE)
-                    .pressedColor(0xFFEBEBEB).round(32).create());
-            lineBottomView.setVisibility(View.INVISIBLE);
-            lineParams.bottomMargin = DpUtils.dip2px(activity, 8);
-            rootLinearLayout.addView(itemHlinearLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, DpUtils.dip2px(activity, 50)));
-        } else {
-            rootLinearLayout.addView(itemHlinearLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, DpUtils.dip2px(activity, 45)));
-            lineParams.bottomMargin = DpUtils.dip2px(activity, 20);
-        }
-
-        rootLinearLayout.addView(lineBottomView, lineParams);
-
-        if (versionCode >= 773 /** 10.3.80.9100 */) {
-            View itemView = ViewUtils.findViewByText(activity.getWindow().getDecorView(), "支付密码", "支付密碼", "Payment Password");
-            if (itemView != null) {
-                ViewGroup itemViewGroup = (ViewGroup) itemView.getParent().getParent().getParent().getParent();
-                L.d("生物支付item: " + ViewUtils.getViewInfo(itemViewGroup));
-                itemViewGroup.setPadding(0, DpUtils.dip2px(activity, 62), 0, 0);
-                itemViewGroup.setClipToPadding(false);
-                FrameLayout.LayoutParams rootLinearLayoutParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                rootLinearLayoutParams.topMargin = -DpUtils.dip2px(activity, 50);
-                rootLinearLayoutParams.leftMargin = DpUtils.dip2px(activity, 12);
-                rootLinearLayoutParams.rightMargin = DpUtils.dip2px(activity, 12);
-                itemViewGroup.addView(rootLinearLayout, rootLinearLayoutParams);
-            }
-        } else {
-            int listViewId = activity.getResources().getIdentifier("setting_list", "id", "com.alipay.android.phone.openplatform");
-            ListView listView = activity.findViewById(listViewId);
-            listView.addHeaderView(rootLinearLayout);
+            L.e("Alipay password input failed", e);
+            restorePassword(token);
         }
     }
 
-    private void doSettingsMenuInject(final Activity activity) {
-        int logout_id = activity.getResources().getIdentifier("logout", "id", "com.alipay.android.phone.openplatform");
-
-        View logoutView = activity.findViewById(logout_id);
-        LinearLayout linearLayout = (LinearLayout) logoutView.getParent();
-        linearLayout.setPadding(0, 0, 0, 0);
-        List<ViewGroup.LayoutParams> childViewParamsList = new ArrayList<>();
-        List<View> childViewList = new ArrayList<>();
-        int childViewCount = linearLayout.getChildCount();
-        for (int i = 0; i < childViewCount; i++) {
-            View view = linearLayout.getChildAt(i);
-            childViewList.add(view);
-            childViewParamsList.add(view.getLayoutParams());
+    private void confirmPassword(Activity activity, EditText edit, View confirm, long token, long deadline) {
+        if (!isInputCurrent(activity, token)) {
+            if (mPaymentSession.owns(token)) restorePassword(token);
+            return;
         }
-
-        linearLayout.removeAllViews();
-
-        View lineTopView = new View(activity);
-        lineTopView.setBackgroundColor(0xFFDFDFDF);
-
-        LinearLayout itemHlinearLayout = new LinearLayout(activity);
-        itemHlinearLayout.setOrientation(LinearLayout.HORIZONTAL);
-        itemHlinearLayout.setWeightSum(1);
-        itemHlinearLayout.setBackground(new XDrawable.Builder().defaultColor(Color.WHITE).create());
-        itemHlinearLayout.setGravity(Gravity.CENTER_VERTICAL);
-        itemHlinearLayout.setClickable(true);
-        itemHlinearLayout.setOnClickListener(view -> new SettingsView(activity).showInDialog());
-
-        int defHPadding = DpUtils.dip2px(activity, 15);
-
-        TextView itemNameText = new TextView(activity);
-        StyleUtils.apply(itemNameText);
-        itemNameText.setText(Lang.getString(R.id.app_settings_name));
-        itemNameText.setGravity(Gravity.CENTER_VERTICAL);
-        itemNameText.setPadding(defHPadding, 0, 0, 0);
-        itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_BIG);
-
-        TextView itemSummerText = new TextView(activity);
-        StyleUtils.apply(itemSummerText);
-        itemSummerText.setText(BuildConfig.VERSION_NAME);
-        itemSummerText.setGravity(Gravity.CENTER_VERTICAL);
-        itemSummerText.setPadding(0, 0, defHPadding, 0);
-        itemSummerText.setTextColor(0xFF888888);
-
-        //try use Alipay style
-        try {
-            View settingsView = ViewUtils.findViewByName(activity, "com.alipay.mobile.ui", "title_bar_title");
-            L.d("settingsView", settingsView);
-            if (settingsView instanceof TextView) {
-                TextView settingsTextView = (TextView) settingsView;
-                float scale = itemNameText.getTextSize() / settingsTextView.getTextSize();
-                itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_PX, settingsTextView.getTextSize());
-                itemSummerText.setTextSize(TypedValue.COMPLEX_UNIT_PX, itemSummerText.getTextSize() / scale);
-                itemNameText.setTextColor(settingsTextView.getCurrentTextColor());
-            }
-        } catch (Exception e) {
-            L.e(e);
+        if (findPasswordEditText(activity) != edit || findConfirmPasswordBtn(edit, false) != confirm) {
+            restorePassword(token);
+            return;
         }
-
-        itemHlinearLayout.addView(itemNameText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        itemHlinearLayout.addView(itemSummerText, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        View lineBottomView = new View(activity);
-        lineBottomView.setBackgroundColor(0xFFDFDFDF);
-
-        linearLayout.addView(lineTopView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        linearLayout.addView(itemHlinearLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, DpUtils.dip2px(activity, 50)));
-        LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1);
-        lineParams.bottomMargin = DpUtils.dip2px(activity, 20);
-        linearLayout.addView(lineBottomView, lineParams);
-
-        for (int i = 0; i < childViewCount; i++) {
-            View view = childViewList.get(i);
-            ViewGroup.LayoutParams params = childViewParamsList.get(i);
-            linearLayout.addView(view, params);
+        if (!confirm.isEnabled()) {
+            if (SystemClock.uptimeMillis() >= deadline) inputFailed(token);
+            else mInputHandler.postDelayed(() -> confirmPassword(activity, edit, confirm, token, deadline), 100);
+            return;
         }
+        try { confirm.performClick(); }
+        catch (Exception error) { L.e("Alipay confirmation failed", error); }
+        finally { restorePassword(token); }
     }
 
-    private void inputDigitPassword(Activity activity, String password) {
-        int versionCode = getVersionCode(activity);
-        DigitPasswordKeyPadInfo digitPasswordKeyPad = AlipayVersionControl.getDigitPasswordKeyPad(versionCode);
-        View ks[] = new View[] {
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key1),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key2),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key3),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key4),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key5),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key6),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key7),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key8),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key9),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key0),
-        };
-        char[] chars = password.toCharArray();
-        for (char c : chars) {
-            View v;
-            switch (c) {
-                case '1':
-                    v = ks[0];
-                    break;
-                case '2':
-                    v = ks[1];
-                    break;
-                case '3':
-                    v = ks[2];
-                    break;
-                case '4':
-                    v = ks[3];
-                    break;
-                case '5':
-                    v = ks[4];
-                    break;
-                case '6':
-                    v = ks[5];
-                    break;
-                case '7':
-                    v = ks[6];
-                    break;
-                case '8':
-                    v = ks[7];
-                    break;
-                case '9':
-                    v = ks[8];
-                    break;
-                case '0':
-                    v = ks[9];
-                    break;
-                default:
-                    continue;
-            }
-            ViewUtils.performActionClick(v);
-        }
+    private void inputFailed(long token) {
+        Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
+        restorePassword(token);
     }
 
-    private boolean tryInputGenericPassword(Activity activity, String password) {
+    private void protectPaymentKeyboard(Activity activity, long token) {
+        View keyboard = findDigitKeyboard(activity);
+        if (keyboard != null) mPaymentSession.protectKeyboard(token, keyboard);
+        else mPaymentSession.protectDigits(token, activity.getWindow().getDecorView(),
+                AlipayVersionControl.getDigitPasswordKeyPad(getVersionCode(activity)));
+    }
 
-        EditText pwdEditText = findPasswordEditText(activity);
-        L.d("pwdEditText", pwdEditText);
-        if (pwdEditText == null) {
-            return false;
+    private boolean isInputCurrent(Activity activity, long token) {
+        Object target = mPaymentSession.target();
+        return mPaymentSession.isActive(token) && mCurrentActivity == activity
+                && ActivityContext.isAlive(activity) && target instanceof View
+                && ((View) target).getWindowToken() != null;
+    }
+
+    private View findDigitKeyboard(Activity activity) {
+        View root = activity.getWindow().getDecorView();
+        String pkg = "com.alipay.android.phone.mobilecommon.verifyidentity";
+        for (String id : new String[]{"keyboard_container", "ll_key_area"}) {
+            View keyboard = ViewUtils.findViewByName(root, pkg, id);
+            if (keyboard instanceof ViewGroup && keyboard.isShown()) return keyboard;
         }
-        View confirmPwdBtn = findConfirmPasswordBtn(activity);
-        L.d("confirmPwdBtn", confirmPwdBtn);
-        if (confirmPwdBtn == null) {
-            return false;
+        DigitPasswordKeyPadInfo info = AlipayVersionControl.getDigitPasswordKeyPad(getVersionCode(activity));
+        List<View> keys = new ArrayList<>();
+        for (String[] ids : info.keys.values()) {
+            View key = ViewUtils.findViewByName(root, info.modulePackageName, ids);
+            if (key != null && key.isShown()) keys.add(key);
         }
-        pwdEditText.setText(password);
-        confirmPwdBtn.performClick();
-        return true;
+        if (keys.size() < 2) return null;
+        for (android.view.ViewParent parent = keys.get(0).getParent(); parent instanceof View && parent != root;
+             parent = parent.getParent()) {
+            boolean containsAll = true;
+            for (View key : keys) {
+                if (!isDescendant((View) parent, key)) { containsAll = false; break; }
+            }
+            if (containsAll) return (View) parent;
+        }
+        return null;
+    }
+
+    private static boolean isDescendant(View parent, View child) {
+        for (View current = child; current != null; ) {
+            if (current == parent) return true;
+            current = current.getParent() instanceof View ? (View) current.getParent() : null;
+        }
+        return false;
     }
 
     private EditText findPasswordEditText(Activity activity) {
-        View pwdEditText = ViewUtils.findViewByName(activity, "com.alipay.android.phone.mobilecommon.verifyidentity", "input_et_password");
-        if (pwdEditText instanceof EditText) {
-            if (!pwdEditText.isShown()) {
-                return null;
-            }
-            return (EditText) pwdEditText;
+        View root = activity.getWindow().getDecorView();
+        View edit = ViewUtils.findViewByName(root, "com.alipay.android.phone.mobilecommon.verifyidentity", "input_et_password");
+        if (edit instanceof EditText && edit.isShown()) return (EditText) edit;
+        for (String pkg : new String[]{"com.alipay.android.phone.mobilecommon.verifyidentity", "com.alipay.mobile.antui"}) {
+            edit = ViewUtils.findViewByName(root, pkg, "ap_six_number_pwd_input");
+            if (edit instanceof EditText && edit.isShown()) return (EditText) edit;
         }
-        // long password
-        ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView();
-        List<View> outList = new ArrayList<>();
-        ViewUtils.getChildViews(rootView, "", outList);
-        for (View view : outList) {
-            if (view instanceof EditText) {
-                if (view.getId() != -1) {
-                    continue;
-                }
-                if (!view.isShown()) {
-                    continue;
-                }
-                return (EditText) view;
-            }
+        List<View> children = new ArrayList<>();
+        ViewUtils.getChildViews((ViewGroup) root, children);
+        for (View view : children) {
+            if (!(view instanceof EditText) || !view.isShown()) continue;
+            int type = ((EditText) view).getInputType();
+            int variation = type & android.text.InputType.TYPE_MASK_VARIATION;
+            int inputClass = type & android.text.InputType.TYPE_MASK_CLASS;
+            boolean password = inputClass == android.text.InputType.TYPE_CLASS_NUMBER
+                    && variation == android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD;
+            password |= inputClass == android.text.InputType.TYPE_CLASS_TEXT
+                    && (variation == android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                    || variation == android.text.InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
+            if (password) return (EditText) view;
         }
         return null;
     }
 
-    private View findConfirmPasswordBtn(Activity activity) {
-        View okView =  ViewUtils.findViewByName(activity, "com.alipay.android.phone.mobilecommon.verifyidentity", "button_ok");
-        L.d("okView", okView);
-        if (okView != null) {
-            if (!okView.isShown()) {
-                return null;
+    private View findConfirmPasswordBtn(EditText edit) { return findConfirmPasswordBtn(edit, true); }
+
+    private View findConfirmPasswordBtn(EditText edit, boolean requireEnabled) {
+        View root = edit.getRootView();
+        for (android.view.ViewParent parent = edit.getParent(); parent instanceof ViewGroup && parent != root;
+             parent = parent.getParent()) {
+            ViewGroup form = (ViewGroup) parent;
+            if (form.getId() == android.R.id.content) break;
+            View idMatch = ViewUtils.findViewByName(form, "com.alipay.android.phone.mobilecommon.verifyidentity", "button_ok");
+            if (isConfirmButton(idMatch, form, requireEnabled)) return idMatch;
+            List<View> children = new ArrayList<>();
+            ViewUtils.getChildViews(form, children);
+            View match = null;
+            for (View view : children) {
+                if (!(view instanceof TextView) || !((TextView) view).getText().toString().trim()
+                        .matches("确定|確定|OK|确认|確認|付款|Pay")) continue;
+                View button = view;
+                while (!button.isClickable() && button.getParent() instanceof View && button.getParent() != form) {
+                    button = (View) button.getParent();
+                }
+                if (!isConfirmButton(button, form, requireEnabled)) continue;
+                if (match != null && match != button) return null;
+                match = button;
             }
-            return okView;
-        }
-        ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView();
-        List<View> outList = new ArrayList<>();
-        ViewUtils.getChildViewsByRegex(rootView, "确定|確定|OK|确认|付款|確認|Pay", outList);
-        int versionCode = getVersionCode(activity);
-        for (View view : outList) {
-            if (view.getId() != -1) {
-                continue;
-            }
-            if (!view.isShown()) {
-                continue;
-            }
-            // 跳过键盘上的OK
-            if (view.getParent().toString().contains(":id/key_enter")) {
-                continue;
-            }
-            if (versionCode < 1261 /** 10.5.96.8000 */) {
-                return (View) view.getParent();
-            }
-            return view;
+            if (match != null) return match;
         }
         return null;
+    }
+
+    private boolean isConfirmButton(View view, ViewGroup form, boolean requireEnabled) {
+        if (view == null || !view.isShown() || (requireEnabled && !view.isEnabled()) || !view.isClickable() || view.getAlpha() <= 0) return false;
+        for (View current = view; current != null; ) {
+            if (current.getId() != View.NO_ID) {
+                try {
+                    String name = current.getResources().getResourceEntryName(current.getId());
+                    if (name.equals("key_enter") || name.contains("keyboard") || name.equals("ll_key_area")) return false;
+                } catch (android.content.res.Resources.NotFoundException ignored) {}
+            }
+            if (current == form) break;
+            current = current.getParent() instanceof View ? (View) current.getParent() : null;
+        }
+        return true;
     }
 
     private void hidePreviousPayDialog() {
-        L.d("hidePreviousPayDialog", mFingerPrintAlertDialog);
-        DialogUtils.dismiss(mFingerPrintAlertDialog);
+        AlertDialog dialog = mFingerPrintAlertDialog;
         mFingerPrintAlertDialog = null;
+        DialogUtils.dismiss(dialog);
     }
 }

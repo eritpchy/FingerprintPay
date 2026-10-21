@@ -1,64 +1,59 @@
 package com.surcumference.fingerprint.util;
 
+import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
-public class ActivityViewObserverHolder {
+public final class ActivityViewObserverHolder {
     public enum Key {
-        AlipaySettingPageEntered,
-        AlipayPasswordView,
-        TaobaoPasswordView,
-        WeChatPayView,
-        WeChatPaymentMethodView,
-        UnionPayPasswordView,
+        AlipayPasswordView, TaobaoPasswordView,
+        WeChatPayView, WeChatPaymentMethodView, UnionPayPasswordView,
     }
-
-    private static Map<Key, ActivityViewObserver> sHolder = new ConcurrentHashMap<>();
-
-    public static void stop(Key key) {
-        synchronized (ActivityViewObserverHolder.class) {
-            ActivityViewObserver obs = sHolder.get(key);
-            if (obs == null) {
-                return;
-            }
-            obs.stop();
-            sHolder.remove(key);
+    private static final Map<Key, Registration> HOLDER = new EnumMap<>(Key.class);
+    private static final class Registration {
+        final ActivityViewObserver observer;
+        Task.Handle timeout;
+        long generation;
+        Registration(ActivityViewObserver observer) { this.observer = observer; }
+        void stop() {
+            if (timeout != null) timeout.cancel();
+            observer.stop();
         }
     }
-
+    public static void stop(Key key) {
+        Task.runOnMain(() -> {
+            Registration registration = HOLDER.remove(key);
+            if (registration != null) registration.stop();
+        });
+    }
     public static void stop(ActivityViewObserver observer) {
-        synchronized (ActivityViewObserverHolder.class) {
+        Task.runOnMain(() -> {
             observer.stop();
-            Iterator<Map.Entry<Key, ActivityViewObserver>> it = sHolder.entrySet().iterator();
-            while (it.hasNext()) {
-                Map.Entry<Key, ActivityViewObserver> entry = it.next();
-                if (entry.getValue() == observer) {
-                    it.remove();
+            Iterator<Registration> iterator = HOLDER.values().iterator();
+            while (iterator.hasNext()) {
+                Registration registration = iterator.next();
+                if (registration.observer == observer) {
+                    iterator.remove();
+                    registration.stop();
                 }
             }
-        }
+        });
     }
-
-    public static void start(Key key, ActivityViewObserver activityViewObserver,
-                             long loopMS, ActivityViewObserver.IActivityViewListener listener) {
-        start(key, activityViewObserver, loopMS, listener, 0);
+    public static void start(Key key, ActivityViewObserver observer, long loop,
+                             ActivityViewObserver.IActivityViewListener listener) {
+        start(key, observer, loop, listener, 0);
     }
-
-    public static void start(Key key, ActivityViewObserver activityViewObserver,
-                             long loopMS, ActivityViewObserver.IActivityViewListener listener,
-                             long timeoutMS) {
-        stop(key);
-        synchronized (ActivityViewObserverHolder.class) {
-            activityViewObserver.start(loopMS, listener);
-            sHolder.put(key, activityViewObserver);
-            if (timeoutMS > 0) {
-                Task.onBackground(timeoutMS, () -> {
-                    // 不会死锁
-                    stop(key);
-                });
-            }
-        }
+    public static void start(Key key, ActivityViewObserver observer, long loop,
+                             ActivityViewObserver.IActivityViewListener listener, long timeout) {
+        Task.runOnMain(() -> {
+            stop(key);
+            Registration registration = new Registration(observer);
+            HOLDER.put(key, registration);
+            if (timeout > 0) registration.timeout = Task.onMain(timeout, () -> {
+                if (HOLDER.get(key) == registration && observer.generation() == registration.generation) stop(key);
+            });
+            observer.start(loop, listener);
+            registration.generation = observer.generation();
+        });
     }
-
 }

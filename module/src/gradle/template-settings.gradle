@@ -1,6 +1,6 @@
 pluginManagement {
     def toolchain = new Properties()
-    file('../../gradle/android-toolchain.properties').withInputStream { toolchain.load(it) }
+    file(providers.gradleProperty('fingerprintRoot').get() + '/gradle/android-toolchain.properties').withInputStream { toolchain.load(it) }
     repositories {
         google()
         mavenCentral()

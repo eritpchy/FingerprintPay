@@ -7,9 +7,21 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <queries>
+        <package android:name="com.tencent.mm"/>
+        <package android:name="com.eg.android.AlipayGphone"/>
+        <package android:name="com.taobao.taobao"/>
+        <package android:name="com.tencent.mobileqq"/>
+        <package android:name="com.unionpay"/>
+        <package android:name="com.topjohnwu.magisk"/>
+        <package android:name="me.weishu.kernelsu"/>
+        <package android:name="com.rifsxd.ksunext"/>
+        <package android:name="me.bmax.apatch"/>
+    </queries>
+
     <application
         android:name="com.surcumference.fingerprint.XApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
@@ -22,6 +34,7 @@
         <meta-data
             android:name="xposeddescription"
             android:value="@string/app_description" />
+        <meta-data android:name="xposedsharedprefs" android:value="true" />
         <meta-data
             android:name="xposedminversion"
             android:value="54" />
@@ -31,21 +44,22 @@
 
         <activity
             android:name=".activity.HomeActivity"
+            android:theme="@style/HomeTheme"
             android:label="@string/app_name"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="${applicationId}.action.CHECK_UPDATES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
-        <activity android:name=".activity.WebActivity"
-            android:parentActivityName=".activity.HomeActivity"/>
-        <activity android:name=".activity.SettingsActivity"
-            android:parentActivityName=".activity.HomeActivity"/>
-        <provider
-         android:name=".util.XPreferenceProvider"
-         android:authorities="com.surcumference.fingerprintpay.XPreferenceProvider"
-         android:exported="true"/>
+        <activity android:name=".activity.ConfigActivity" android:theme="@style/HomeTheme" android:exported="false"/>
+        <provider android:name=".storage.ConfigProvider" android:authorities="com.surcumference.fingerprintpay.config" android:exported="true">
+            <grant-uri-permission android:path="/runtime"/>
+        </provider>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="com.surcumference.fingerprintpay.fileprovider"

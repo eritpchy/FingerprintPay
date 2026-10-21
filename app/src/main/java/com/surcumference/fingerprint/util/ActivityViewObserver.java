@@ -20,6 +20,8 @@ public class ActivityViewObserver {
 
     private WeakReference<Activity> mActivityRef;
     private boolean mRunning = false;
+    private long mGeneration;
+    private Task.Handle mPending;
     private String mViewIdentifyType;
     private String[] mViewIdentifyTexts;
 
@@ -48,6 +50,10 @@ public class ActivityViewObserver {
     }
 
     public void start(long loopMSec, IActivityViewListener listener) {
+        Task.runOnMain(() -> startOnMain(loopMSec, listener));
+    }
+
+    private void startOnMain(long loopMSec, IActivityViewListener listener) {
         if (TextUtils.isEmpty(this.mViewIdentifyType)
                 && (mViewIdentifyTexts == null || mViewIdentifyTexts.length == 0)
                 && mIActivityViewFinder == null) {
@@ -57,11 +63,18 @@ public class ActivityViewObserver {
             return;
         }
         mRunning = true;
-        task(loopMSec, listener);
+        task(loopMSec, listener, ++mGeneration);
     }
 
+    long generation() { return mGeneration; }
+
     public void stop() {
-        mRunning = false;
+        Task.runOnMain(() -> {
+            mRunning = false;
+            ++mGeneration;
+            if (mPending != null) mPending.cancel();
+            mPending = null;
+        });
     }
 
     @Nullable
@@ -69,8 +82,8 @@ public class ActivityViewObserver {
         return mActivityRef.get();
     }
 
-    private void task(long loopMSec, IActivityViewListener listener) {
-        if (!mRunning) {
+    private void task(long loopMSec, IActivityViewListener listener, long generation) {
+        if (!mRunning || generation != mGeneration) {
             return;
         }
         Activity activity = mActivityRef.get();
@@ -125,6 +138,7 @@ public class ActivityViewObserver {
         if (viewList.size() > 0) {
             Set<View> viewLinkedHashSet = new LinkedHashSet<>(viewList);
             for (View targetView : viewLinkedHashSet) {
+                if (!mRunning || generation != mGeneration) return;
                 if (ViewUtils.isViewVisibleInScreen(targetView.getRootView())) {
                     onViewFounded(listener, targetView);
                     // 好像是故意不加的
@@ -132,7 +146,9 @@ public class ActivityViewObserver {
                 }
             }
         }
-        Task.onMain(loopMSec, () -> task(loopMSec, listener));
+        if (mRunning && generation == mGeneration) {
+            mPending = Task.onMain(Math.max(1, loopMSec), () -> task(loopMSec, listener, generation));
+        }
     }
 
     private void onViewFounded(IActivityViewListener listener, View view) {

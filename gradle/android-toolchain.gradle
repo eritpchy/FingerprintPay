@@ -1,5 +1,7 @@
 def toolchain = new Properties()
-rootProject.file(rootProject.name == 'MagiskModuleTemplate' ? '../../gradle/android-toolchain.properties' : 'gradle/android-toolchain.properties').withInputStream { toolchain.load(it) }
+def toolchainPath = providers.gradleProperty('fingerprintRoot').map { it + '/gradle/android-toolchain.properties' }
+        .getOrElse(rootProject.name == 'MagiskModuleTemplate' ? '../../gradle/android-toolchain.properties' : 'gradle/android-toolchain.properties')
+rootProject.file(toolchainPath).withInputStream { toolchain.load(it) }
 android {
     compileSdk {
         version = release(toolchain.compileSdk as int) {

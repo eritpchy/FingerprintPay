@@ -1,7 +1,5 @@
 package com.surcumference.fingerprint.util;
 
-import com.surcumference.fingerprint.util.log.L;
-
 import java.lang.ref.WeakReference;
 
 /**
@@ -22,30 +20,21 @@ public class XBiometricIdentifyManager {
 
     private WeakReference<XBiometricIdentify> lastXBiometricIdentifyRef;
 
-    public void cancelFingerprintIdentify() {
-        synchronized (XBiometricIdentifyManager.class) {
-            try {
-                WeakReference<XBiometricIdentify> lastXBiometricIdentifyRef = this.lastXBiometricIdentifyRef;
-                if (lastXBiometricIdentifyRef == null) {
-                    return;
-                }
-                XBiometricIdentify fingerprintIdentify = lastXBiometricIdentifyRef.get();
-                if (fingerprintIdentify == null) {
-                    return;
-                }
-                if (!fingerprintIdentify.fingerprintScanStateReady) {
-                    return;
-                }
-                L.d("cancel last fingerprintIdentify!");
-                fingerprintIdentify.cancelIdentify();
-            } finally {
-                this.lastXBiometricIdentifyRef = null;
-            }
+    public synchronized void cancelFingerprintIdentify() {
+        XBiometricIdentify identify = lastXBiometricIdentifyRef == null ? null : lastXBiometricIdentifyRef.get();
+        lastXBiometricIdentifyRef = null;
+        if (identify != null) {
+            identify.cancelIdentify();
         }
     }
-    public void set(XBiometricIdentify biometricIdentify) {
-        synchronized (XBiometricIdentifyManager.class) {
-            this.lastXBiometricIdentifyRef = biometricIdentify == null ? null : new WeakReference<>(biometricIdentify);
+
+    public synchronized void set(XBiometricIdentify identify) {
+        lastXBiometricIdentifyRef = identify == null ? null : new WeakReference<>(identify);
+    }
+
+    public synchronized void clear(XBiometricIdentify identify) {
+        if (lastXBiometricIdentifyRef != null && lastXBiometricIdentifyRef.get() == identify) {
+            lastXBiometricIdentifyRef = null;
         }
     }
 }

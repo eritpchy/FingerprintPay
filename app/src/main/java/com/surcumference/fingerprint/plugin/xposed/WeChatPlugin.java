@@ -64,7 +64,21 @@ public class WeChatPlugin {
                     plugin.onActivityPaused((Activity) param.thisObject);
                 }
             });
+            XposedHelpers.findAndHookMethod(Activity.class, "onStop", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    plugin.onActivityStopped((Activity) param.thisObject);
+                }
+            });
+            XposedHelpers.findAndHookMethod(Activity.class, "onDestroy", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    plugin.onActivityDestroyed((Activity) param.thisObject);
+                }
+            });
+            com.surcumference.fingerprint.storage.XposedRuntime.install(application, true);
         } catch (Throwable l) {
+            try { com.surcumference.fingerprint.storage.XposedRuntime.install(application, false); } catch (Throwable ignored) {}
             L.e(l);
             XposedBridge.log(l);
         }

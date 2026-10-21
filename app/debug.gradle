@@ -1,96 +1,111 @@
-ext {
-    adbPath = androidComponents.sdkComponents.adb.get().asFile.absolutePath
-    xposed = project.findProperty('xposed')?.toBoolean() ?: false
+import java.security.MessageDigest
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+
+def deviceUser = project.findProperty('androidUser')?.toString() ?: '0'
+if (!(deviceUser ==~ /0|[1-9][0-9]{0,4}/)) throw new GradleException('androidUser must be a non-negative Android user ID')
+def adbCommand = [androidComponents.sdkComponents.adb.get().asFile.absolutePath]
+if (project.hasProperty('adbSerial')) adbCommand += ['-s', project.property('adbSerial').toString()]
+def runAdb = { List arguments ->
+    providers.exec { commandLine(adbCommand + arguments) }.result.get().assertNormalExitValue()
 }
-def adbPushToAppFiles(dexPath, targetName, targetPackage) {
-    providers.exec {
-        executable = adbPath
-        args = ['push', dexPath, "/data/local/tmp/${targetName}"]
-    }.result.get()
-    providers.exec {
-        executable = adbPath
-        args = ["shell", "su", "-c", 
-            """"NAME=${targetName} && \
-            mv /data/local/tmp/\\\$NAME /data/data/$targetPackage/files/\\\$NAME && \
-            chmod 444 /data/data/$targetPackage/files/\\\$NAME && \
-            UID=\\\$(stat -c "%u" /data/data/$targetPackage) && \
-            GID=\\\$(stat -c "%g" /data/data/$targetPackage) && \
-            chown \\\$UID:\\\$GID /data/data/$targetPackage/files/\\\$NAME && \
-            true" """]
-    }.result.get()
+def quote = { String value -> "'" + value.replace("'", "'\\''") + "'" }
+def rootShell = { String command -> runAdb(['shell', 'su', '-c', quote("set -eu; " + command)]) }
+def hash = { File file ->
+    def digest = MessageDigest.getInstance('SHA-256')
+    file.eachByte(65536) { bytes, size -> digest.update(bytes, 0, size) }
+    digest.digest()
+}
+def exportDebugDex = tasks.register('exportDebugDex') {
+    dependsOn('exportDebugPayload')
+    def payload = layout.buildDirectory.file('outputs/payload/debug/payload.apk')
+    def output = layout.buildDirectory.dir('outputs/dex/debug')
+    inputs.file(payload)
+    inputs.file(rootProject.file('module/prepare-payload.py'))
+    outputs.dir(output)
+    doLast {
+        providers.exec {
+            commandLine 'python3', rootProject.file('module/prepare-payload.py'), payload.get().asFile, output.get().asFile
+        }.result.get().assertNormalExitValue()
+        Files.move(new File(output.get().asFile, 'payload.bin').toPath(),
+                new File(output.get().asFile, 'payload.dex').toPath(), StandardCopyOption.REPLACE_EXISTING)
+    }
 }
 
-project.ext.appInfo.each {entry ->
+project.ext.appInfo.each { entry ->
     def name = entry.key
     def packageName = entry.value
-    def stopTask = tasks.create(name: "stop$name", type: Exec) {
-        doFirst { println "Stop $name..." }
-        executable = adbPath
-        args = ['shell', "am force-stop $packageName"]
-    }
-    def startTask = tasks.create(name: "start$name", dependsOn: [stopTask], type: Exec) {
-        doFirst { println "Start $name..." }
-        executable = adbPath
-        args = ['shell', "sleep 3;am start \$(cmd package resolve-activity --brief ${packageName} | tail -n 1)"]
-    }
-    def debugXposedTask = tasks.create(name: "debug${name}Xposed", dependsOn: ["installDebug", stopTask], type: Exec) {
-        executable = adbPath
-        args = ['shell', "package=${android.defaultConfig.applicationId}&& cp -f \$(pm path \$package| cut -d: -f2) /data/local/tmp/\$package.apk && chmod 777 /data/local/tmp/\$package.apk"]
-    }
-    debugXposedTask.finalizedBy(startTask)
-}
-
-androidComponents.onVariants(androidComponents.selector().all()) { variant ->
-    def buildTypeName = variant.buildType
-    def buildTypeNameCapitalize = variant.name.capitalize()
-    def apkDirectory = variant.artifacts.get(rootProject.androidApkArtifact)
-    def exportDex = tasks.register("export${buildTypeNameCapitalize}Dex", Sync) {
-        dependsOn(apkDirectory)
-        from({
-            def apks = fileTree(apkDirectory.get().asFile).matching { include '*.apk' }.files
-            if (apks.size() != 1) throw new GradleException('Expected one APK for native module payload')
-            def dexFiles = zipTree(apks.first()).matching { include 'classes*.dex' }.files
-            if (dexFiles.size() != 1) throw new GradleException('Native modules require a single DEX payload')
-            dexFiles
-        })
-        into layout.buildDirectory.dir("outputs/dex/${variant.name}")
-    }
-
-    project.ext.appInfo.each { entry ->
-        def name = entry.key
-        def packageName = entry.value
-        project.ext.moduleFrameworks.each { framework ->
-            def moduleTask = tasks.register("${buildTypeName}${name}${framework.capitalize()}") {
-                dependsOn(exportDex)
-                doLast {
-                    def dexPath = layout.buildDirectory.file("outputs/dex/${variant.name}/classes.dex").get().asFile.absolutePath
-                    adbPushToAppFiles(dexPath, "${framework}-module-xfingerprint-pay-${name.toLowerCase()}.dex", packageName)
-                }
+    def stopApp = { runAdb(['shell', 'am', 'force-stop', '--user', deviceUser, packageName]) }
+    def launchActivity = {
+        for (tool in [['cmd', 'package'], ['pm']]) {
+            def result = providers.exec {
+                commandLine(adbCommand + ['shell'] + tool + ['resolve-activity', '--brief', '--user', deviceUser,
+                        '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', packageName])
+                ignoreExitValue = true
             }
-            moduleTask.configure { finalizedBy("start$name") }
+            def component = result.standardOutput.asText.get().readLines().find { it ==~ /[A-Za-z0-9_.]+\/[A-Za-z0-9_.$]+/ }
+            if (result.result.get().exitValue == 0 && component) return component
         }
+        throw new GradleException("No launcher activity for $packageName, user $deviceUser")
     }
-
-    tasks.matching { it.name == "install${buildTypeNameCapitalize}" }.configureEach {
+    def startApp = { String component -> runAdb(['shell', 'am', 'start', '--user', deviceUser, '-n', component]) }
+    def stop = tasks.register("stop$name") { doLast { stopApp() } }
+    tasks.register("start$name") {
+        dependsOn(stop)
+        doLast { startApp(launchActivity()) }
+    }
+    tasks.register("debug${name}Zygisk") {
+        group = 'debug deployment'
+        description = "Send Debug DEX and resources, then restart $name (requires a loaded Debug Zygisk module)"
+        dependsOn(exportDebugDex)
         doLast {
-            providers.exec {
-                executable = adbPath
-                args = ['shell', "monkey -p ${variant.applicationId.get()} -c android.intent.category.LAUNCHER 1"]
-            }.result.get()
-        }
-    }
-    variant.outputs.each { output ->
-        output.outputFileName.set("xposed.${android.defaultConfig.applicationId}.wechatfp.${android.defaultConfig.versionName}.${buildTypeName}.apk")
-    }
-}
-
-tasks.matching { it.name.startsWith('minify') && it.name.endsWith('WithR8') }.configureEach {
-    inputs.property('xposed', xposed)
-    doFirst {
-        if (!xposed) {
-            fileTree(layout.buildDirectory.dir('intermediates/aapt_proguard_file')).matching {
-                include '**/aapt_rules.txt'
-            }.files.each { it.delete() }
+            def component = launchActivity()
+            def dex = layout.buildDirectory.file('outputs/dex/debug/payload.dex').get().asFile
+            def resources = layout.buildDirectory.file('outputs/dex/debug/resources.apk').get().asFile
+            def dexHash = hash(dex).encodeHex().toString()
+            def resourcesHash = hash(resources).encodeHex().toString()
+            def generation = MessageDigest.getInstance('SHA-256').digest((dexHash + resourcesHash).getBytes('UTF-8')).encodeHex().toString()
+            def module = 'zygisk-module-xfingerprint-pay-all'
+            def data = "/data/user/$deviceUser/$packageName"
+            def directory = "$data/files/${module}.debug"
+            def target = "$directory/$generation"
+            def staging = "/data/local/tmp/$module-debug-$packageName-$deviceUser-$generation"
+            rootShell("test -f /data/adb/modules/$module/debug-file-dex || { echo 'Install and reboot with the Debug Zygisk module first' >&2; exit 1; }; test ! -f /data/adb/modules/$module/disable; test ! -f /data/adb/modules/$module/remove; test -d '$data/files'; test ! -L '$directory'")
+            def probe = providers.exec {
+                commandLine(adbCommand + ['shell', 'su', '-c', quote("if test -d '$target'; then printf present; fi")])
+            }
+            def present = probe.standardOutput.asText.get() == 'present'
+            probe.result.get().assertNormalExitValue()
+            if (!present) {
+                runAdb(['shell', 'mkdir', '-p', staging])
+                runAdb(['push', dex.absolutePath, "$staging/payload.dex"])
+                runAdb(['push', resources.absolutePath, "$staging/resources.apk"])
+            }
+            rootShell("""
+                mkdir -p '$directory'
+                if test ! -d '$target'; then
+                    test \"\$(sha256sum '$staging/payload.dex' | cut -d' ' -f1)\" = '$dexHash'
+                    test \"\$(sha256sum '$staging/resources.apk' | cut -d' ' -f1)\" = '$resourcesHash'
+                    mv '$staging' '$target'
+                fi
+                test ! -L '$target'
+                test \"\$(sha256sum '$target/payload.dex' | cut -d' ' -f1)\" = '$dexHash'
+                test \"\$(sha256sum '$target/resources.apk' | cut -d' ' -f1)\" = '$resourcesHash'
+                APP_UID=\$(stat -c %u '$data')
+                APP_GID=\$(stat -c %g '$data')
+                chown -R \"\$APP_UID:\$APP_GID\" '$directory'
+                chmod 700 '$directory'
+                chmod 500 '$target'
+                chmod 444 '$target/payload.dex' '$target/resources.apk'
+                test ! -L '$directory/.current-$generation'
+                printf '%s' '$generation' > '$directory/.current-$generation'
+                chown \"\$APP_UID:\$APP_GID\" '$directory/.current-$generation'
+                chmod 444 '$directory/.current-$generation'
+                restorecon -RF '$directory'
+                mv -f '$directory/.current-$generation' '$directory/current'
+            """)
+            stopApp()
+            startApp(component)
         }
     }
 }

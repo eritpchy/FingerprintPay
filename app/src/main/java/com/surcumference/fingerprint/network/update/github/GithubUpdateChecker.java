@@ -4,11 +4,17 @@ import android.text.TextUtils;
 
 import com.google.gson.Gson;
 import com.surcumference.fingerprint.BuildConfig;
+import com.surcumference.fingerprint.bean.PluginType;
+import com.surcumference.fingerprint.plugin.PluginApp;
 import com.surcumference.fingerprint.Lang;
 import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.bean.UpdateInfo;
 import com.surcumference.fingerprint.network.inf.UpdateResultListener;
-import com.surcumference.fingerprint.network.interceptor.UrlFallbackInterceptor;
+import com.surcumference.fingerprint.network.ModuleNetwork;
+import com.surcumference.fingerprint.util.Task;
+import android.os.SystemClock;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import com.surcumference.fingerprint.network.update.BaseUpdateChecker;
 import com.surcumference.fingerprint.network.update.github.bean.GithubAssetsInfo;
 import com.surcumference.fingerprint.network.update.github.bean.GithubLatestInfo;
@@ -17,14 +23,10 @@ import com.surcumference.fingerprint.util.StringUtils;
 import com.surcumference.fingerprint.util.log.L;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.Date;
 
 import okhttp3.Call;
-import okhttp3.Callback;
 import okhttp3.OkHttpClient;
-import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
 
@@ -36,67 +38,60 @@ public class GithubUpdateChecker extends BaseUpdateChecker {
     public final OkHttpClient mHttpClient;
     private final String mLocalVersion;
     private final String[] mUpdateUrls;
+    private final PluginType mPluginType;
+    private final AtomicLong generation = new AtomicLong();
 
     public GithubUpdateChecker(String localVersion, String[] updateUrls, UpdateResultListener listener) {
+        this(localVersion, updateUrls, PluginApp.getCurrentType(), listener);
+    }
+
+    public GithubUpdateChecker(String localVersion, String[] updateUrls, PluginType type, UpdateResultListener listener) {
         super(listener);
         if (updateUrls.length == 0) {
             throw new IllegalArgumentException("Error: expected update urls, got zero");
         }
         this.mLocalVersion = localVersion;
-        this.mUpdateUrls = updateUrls;
-        OkHttpClient.Builder builder = new OkHttpClient.Builder()
-        .retryOnConnectionFailure(true);
-        if (updateUrls.length > 1) {
-            String[] fallbackUrls = Arrays.copyOfRange(updateUrls, 1, updateUrls.length);
-            builder.addInterceptor(new UrlFallbackInterceptor(fallbackUrls));
-        }
-        this.mHttpClient = builder.build();
+        this.mUpdateUrls = updateUrls.clone();
+        this.mPluginType = type;
+        this.mHttpClient = ModuleNetwork.client();
     }
 
     @Override
     public void doUpdateCheck() {
-        Callback callback;
-        callback = new Callback() {
-            @Override
-            public void onFailure(Call call, IOException e) {
-                onNetErr(e);
-            }
-
-            @Override
-            public void onResponse(Call call, Response response) throws IOException {
-                if (response != null && response.isSuccessful()) {
-                    String replay = response.body().string();
-                    response.close();
-                    try {
-                        GithubLatestInfo info = new Gson().fromJson(replay, GithubLatestInfo.class);
-                        if (!info.isDataComplete()) {
-                            onNetErr(new IllegalArgumentException("data not complete!, data: " + replay));
-                            return;
+        long token = generation.incrementAndGet();
+        Task.onBackground(() -> {
+            long deadline = SystemClock.elapsedRealtime() + 60000;
+            Exception failure = new IOException("Update check timed out");
+            for (String url : mUpdateUrls) {
+                if (generation.get() != token) return;
+                long remaining = deadline - SystemClock.elapsedRealtime();
+                if (remaining <= 0) break;
+                try {
+                    Call call = mHttpClient.newCall(new Request.Builder().url(url).build());
+                    call.timeout().timeout(remaining, TimeUnit.MILLISECONDS);
+                    try (Response response = call.execute()) {
+                        if (!response.isSuccessful()) {
+                            String body = response.body() == null ? "" : response.peekBody(4096).string();
+                            throw new IOException("HTTP " + response.code() + ": " + body);
                         }
+                        if (response.body() == null) throw new IOException("Empty update response");
+                        GithubLatestInfo info = new Gson().fromJson(response.body().string(), GithubLatestInfo.class);
+                        if (info == null || !info.isDataComplete(mPluginType)) throw new IOException("Incomplete update data");
+                        if (generation.get() != token) return;
                         if (BuildConfig.DEBUG || StringUtils.isAppNewVersion(mLocalVersion, info.version)) {
-                            L.d("info", info);
-                            String content = appendUpdateExtInfo(info.content, info.date, info.contentUrl);
-                            L.d("content", content);
-                            GithubAssetsInfo assetsInfo = info.getDownloadAssetsInfo();
-                            UpdateInfo updateInfo = new UpdateInfo(info.version, content,
-                                    info.contentUrl, assetsInfo.url, assetsInfo.name, assetsInfo.size);
-                            onHasUpdate(updateInfo);
-                        } else {
-                            onNoUpdate();
-                        }
+                            GithubAssetsInfo asset = info.getDownloadAssetsInfo(mPluginType);
+                            UpdateInfo update = new UpdateInfo(info.version,
+                                    appendUpdateExtInfo(info.content, info.date, info.contentUrl),
+                                    info.contentUrl, asset.url, asset.name, asset.size);
+                            update.digest = asset.digest;
+                            onHasUpdate(update);
+                        } else onNoUpdate();
                         return;
-                    } catch (Exception e) {
-                        L.d(e);
                     }
-                }
-                onNetErr(new IOException("response not successful. code: " + response.code()));
+                } catch (Exception error) { failure = error; }
             }
-        };
-
-        Request request = new Request.Builder()
-                .url(this.mUpdateUrls[0])
-                .build();
-        mHttpClient.newCall(request).enqueue(callback);
+            if (generation.get() == token) onNetErr(failure);
+        });
     }
 
     private String appendUpdateExtInfo(String content, Date date, String pageUrl) {

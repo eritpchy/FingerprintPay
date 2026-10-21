@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="scope">
+        <item>com.surcumference.fingerprintpay</item>
         <item>com.eg.android.AlipayGphone</item>
         <item>com.taobao.taobao</item>
         <item>com.tencent.mobileqq</item>

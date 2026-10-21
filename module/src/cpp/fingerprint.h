@@ -1,12 +1,17 @@
-#ifndef _FINGERPRINT_H_
-#define _FINGERPRINT_H_
-
+#pragma once
 #include <jni.h>
+#include <stdbool.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
+#define MAGISK_MODULE_TYPE_ZYGISK "Zygisk"
+void fingerprintPre(JNIEnv* env, jstring* appDataDir, jstring* niceName, int uid, int companion, int moduleDir);
+void fingerprintPost(JNIEnv* env, const char* type);
+bool fingerprintEnabled();
+void fingerprintDisable();
+void fingerprintDeferResource();
+int fingerprintResourceFd();
 
-#define MAGISK_MODULE_TYPE_RIRU     "Riru"
-#define MAGISK_MODULE_TYPE_ZYGISK   "Zygisk"
-
-void fingerprintPre(JNIEnv *env, jstring *appDataDir, jstring *niceName);
-void fingerprintPost(JNIEnv *env, const char *pluginTypeName);
-
-#endif // _FINGERPRINT_H_
+#ifdef __cplusplus
+}
+#endif

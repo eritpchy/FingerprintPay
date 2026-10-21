@@ -1,9 +1,6 @@
 package com.surcumference.fingerprint.plugin.xposed;
 
-import android.annotation.TargetApi;
-import android.app.Activity;
 import android.app.Application;
-import android.os.Bundle;
 
 import androidx.annotation.Keep;
 
@@ -19,9 +16,7 @@ import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
 import com.surcumference.fingerprint.util.Umeng;
 import com.surcumference.fingerprint.util.log.L;
 
-import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
@@ -39,21 +34,10 @@ public class AlipayPlugin {
             Umeng.init(application);
             UpdateFactory.lazyUpdateWhenActivityAlive();
             IAppPlugin plugin = PluginFactory.loadPlugin(application, Constant.PACKAGE_NAME_ALIPAY);
-            XposedHelpers.findAndHookMethod(Activity.class, "onCreate", Bundle.class, new XC_MethodHook() {
-
-                @TargetApi(21)
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    plugin.onActivityCreated((Activity) param.thisObject, (Bundle) param.args[0]);
-                }
-            });
-            XposedHelpers.findAndHookMethod(Activity.class, "onResume", new XC_MethodHook() {
-
-                @TargetApi(21)
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    plugin.onActivityResumed((Activity) param.thisObject);
-                }
-            });
+            com.surcumference.fingerprint.xposed.XposedAppLifecycle.install(plugin);
+            com.surcumference.fingerprint.storage.XposedRuntime.install(application, true);
         } catch (Throwable l) {
+            try { com.surcumference.fingerprint.storage.XposedRuntime.install(application, false); } catch (Throwable ignored) {}
             L.e(l);
             XposedBridge.log(l);
         }

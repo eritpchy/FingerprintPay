@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" >
-
-    <CheckBoxPreference
-        android:key="show_icon"
-        android:title="@string/settings_title_show_icon"
-        android:defaultValue="true" />
-
-</PreferenceScreen>

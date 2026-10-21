@@ -11,7 +11,6 @@ import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
 import android.text.TextUtils;
-import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
@@ -32,6 +31,8 @@ import com.surcumference.fingerprint.util.DpUtils;
 import com.surcumference.fingerprint.util.StyleUtils;
 import com.surcumference.fingerprint.util.Umeng;
 import com.surcumference.fingerprint.util.drawable.XDrawable;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Created by Jason on 2017/9/9.
@@ -42,11 +43,12 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
     private OnDismissListener mDismissListener;
     private OnShowListener<T> mShowListener;
     private DialogInterface.OnClickListener mOnNeutralButtonClickListener;
-    private DialogInterface.OnClickListener mOnNegativeButtonClickListener;
     private DialogInterface.OnClickListener mOnPositiveButtonClickListener;
     private String mNeutralButtonText;
     private String mNegativeButtonText;
     private String mPositiveButtonText;
+    private TextView mTitleView;
+    private final List<TextView> mActionViews = new ArrayList<>();
     @Nullable
     private AlertDialog mDialog;
 
@@ -54,17 +56,10 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
         super(context);
     }
 
-    public DialogFrameLayout(@NonNull Context context, @Nullable AttributeSet attrs) {
-        super(context, attrs);
-    }
-
-    public DialogFrameLayout(@NonNull Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
-        super(context, attrs, defStyleAttr);
-    }
-
     public AlertDialog showInDialog() {
         Context context = getContext();
-        ContextThemeWrapper contextThemeWrapper = new ContextThemeWrapper(context, android.R.style.Theme_Material_NoActionBar_Fullscreen);
+        ContextThemeWrapper contextThemeWrapper = new ContextThemeWrapper(context, StyleUtils.isDarkMode(context)
+                ? android.R.style.Theme_Material_NoActionBar_Fullscreen : android.R.style.Theme_Material_Light_NoActionBar_Fullscreen);
         //修复支付宝主页显示更新页面时dialog宽度不正常
         contextThemeWrapper.applyOverrideConfiguration(new Configuration());
         AlertDialog.Builder builder = new AlertDialog.Builder(contextThemeWrapper)
@@ -115,11 +110,6 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
         return (T)this;
     }
 
-    public T withOnNegativeButtonClickListener(DialogInterface.OnClickListener listener) {
-        mOnNegativeButtonClickListener = listener;
-        return (T)this;
-    }
-
     public T withOnPositiveButtonClickListener(DialogInterface.OnClickListener listener) {
         mOnPositiveButtonClickListener = listener;
         return (T)this;
@@ -157,12 +147,28 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
         return new Rect(padding, padding, padding, padding);
     }
 
+    protected int dialogCornerRadius() { return DpUtils.dip2px(getContext(), 10); }
+
+    @Override protected void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        if (mTitleView != null) mTitleView.setTextColor(StyleUtils.textColor(getContext()));
+        for (TextView action : mActionViews) styleAction(action);
+        if (mDialog != null && mDialog.getWindow() != null) mDialog.getWindow().setBackgroundDrawable(dialogWindowBackground());
+    }
+
+    private void styleAction(TextView action) {
+        action.setTextColor(StyleUtils.accentColor(getContext()));
+        action.setBackground(new XDrawable.Builder().pressedColor(StyleUtils.pressedColor(getContext()))
+                .round(DpUtils.dip2px(getContext(), 8)).create());
+    }
+
     private TextView createTitleTextView() {
         String title = getDialogTitle();
         Context context = getContext();
         TextView titleTextView = new TextView(context);
+        mTitleView = titleTextView;
         titleTextView.setText(title);
-        titleTextView.setTextColor(Color.BLACK);
+        titleTextView.setTextColor(StyleUtils.textColor(context));
         titleTextView.setBackgroundColor(Color.TRANSPARENT);
         titleTextView.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         titleTextView.setTypeface(Typeface.defaultFromStyle(Typeface.BOLD));
@@ -179,9 +185,9 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
     private View createNeutralButton(AlertDialog dialog) {
         Context context = getContext();
         TextView textView = new TextView(context);
-        textView.setTextColor(0xFF009688);
+        mActionViews.add(textView);
+        styleAction(textView);
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_DEFAULT);
-        textView.setBackground(new XDrawable.Builder().round(DpUtils.dip2px(context, 3)).create());
         textView.setMinWidth(DpUtils.dip2px(context, 45));
         textView.setGravity(Gravity.CENTER);
 
@@ -211,9 +217,9 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
     private View createNegativeButton(AlertDialog dialog) {
         Context context = getContext();
         TextView textView = new TextView(context);
-        textView.setTextColor(0xFF009688);
+        mActionViews.add(textView);
+        styleAction(textView);
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_DEFAULT);
-        textView.setBackground(new XDrawable.Builder().round(DpUtils.dip2px(context, 3)).create());
         textView.setMinWidth(DpUtils.dip2px(context, 45));
         textView.setGravity(Gravity.CENTER);
 
@@ -225,14 +231,7 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
             textView.setVisibility(GONE);
         } else {
             textView.setText(text);
-            textView.setOnClickListener(v -> {
-                DialogInterface.OnClickListener listener = mOnNegativeButtonClickListener;
-                if (listener != null) {
-                    listener.onClick(dialog, DialogInterface.BUTTON_NEGATIVE);
-                } else {
-                    dialog.dismiss();
-                }
-            });
+            textView.setOnClickListener(v -> dialog.dismiss());
         }
         LinearLayout btnCon = new LinearLayout(context);
         btnCon.addView(textView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -243,9 +242,9 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
     private View createPositiveButton(AlertDialog dialog) {
         Context context = getContext();
         TextView textView = new TextView(context);
-        textView.setTextColor(0xFF009688);
+        mActionViews.add(textView);
+        styleAction(textView);
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_DEFAULT);
-        textView.setBackground(new XDrawable.Builder().round(DpUtils.dip2px(context, 3)).create());
         textView.setMinWidth(DpUtils.dip2px(context, 45));
         textView.setGravity(Gravity.CENTER);
 
@@ -325,8 +324,8 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
 
     private Drawable dialogWindowBackground() {
         GradientDrawable shape =  new GradientDrawable();
-        shape.setCornerRadius(DpUtils.dip2px(getContext(), 10));
-        shape.setColor(0xFFF5F5F5);
+        shape.setCornerRadius(dialogCornerRadius());
+        shape.setColor(StyleUtils.dialogColor(getContext()));
         Rect inset = dialogWindowInset();
         return new InsetDrawable(shape, inset.left, inset.top, inset.right, inset.bottom);
     }

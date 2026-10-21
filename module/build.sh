@@ -1,63 +1,50 @@
 #!/bin/bash
-set -e
-cd ${0%/*}
-MODULE_GRALDE_TASK="$1"
-MODULE_GRALDE_FILE="$2"
-PLUGIN_TYPE_NAME="$3"
-MODULE_TEMPLATE="../3rdparty/MagiskModuleTemplate"
-VERSION_NAME=$(cat ../app/build.gradle| grep versionName | sed -E 's/.+"(.+)".*/\1/g')
-VERSION_CODE=$(cat ../app/build.gradle| grep versionCode | sed -E 's/.+versionCode +([0-9]+).*/\1/g')
-APP_PRODUCT_TARGET=$(echo "$MODULE_GRALDE_FILE"|sed -E 's/.+\/(.+)\..+/\1/g')
-MODULE_LIB_NAME="$(echo "$PLUGIN_TYPE_NAME" | tr '[:upper:]' '[:lower:]')-module-xfingerprint-pay-$APP_PRODUCT_TARGET"
-echo VERSION_NAME: $VERSION_NAME
-echo VERSION_CODE: $VERSION_CODE
-bash ./reset.sh
-cp ../gradlew ../gradlew.bat "$MODULE_TEMPLATE/"
-cp ../gradle/wrapper/* "$MODULE_TEMPLATE/gradle/wrapper/"
-cp ../gradle.properties "$MODULE_TEMPLATE/gradle.properties"
-cp ./src/gradle/template-settings.gradle "$MODULE_TEMPLATE/settings.gradle"
-cp ./src/gradle/template-build.gradle "$MODULE_TEMPLATE/build.gradle"
-cp ./src/gradle/template-module.gradle "$MODULE_TEMPLATE/module/build.gradle"
-bash ../gradlew -p .. :app:exportReleaseDex -Pxposed=false
-cp -rfv ./src/cpp/* $MODULE_TEMPLATE/module/src/main/cpp/
-cp -rfv "$MODULE_GRALDE_FILE" $MODULE_TEMPLATE/module.gradle
-cp -rfv "./src/gradle/fingerprint.gradle" $MODULE_TEMPLATE/
-if [ -f "../local.properties" ]; then cp -rfv ../local.properties $MODULE_TEMPLATE/; fi
-if [ "$PLUGIN_TYPE_NAME" == "Zygisk" ]; then
-  echo "ZYGISK_MODULE_LIB_NAME=\"$MODULE_LIB_NAME\"" > $MODULE_TEMPLATE/template/magisk_module/customize.sh
-  cat ./src/zygisk/customize.sh >> $MODULE_TEMPLATE/template/magisk_module/customize.sh
-  python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' "$MODULE_TEMPLATE/template/magisk_module/riru.sh"
-else
-  cat ./src/magisk/customize.sh >> $MODULE_TEMPLATE/template/magisk_module/customize.sh
-fi
-echo "rm -f \"/data/local/tmp/lib$MODULE_LIB_NAME.dex\" || true" >> $MODULE_TEMPLATE/template/magisk_module/uninstall.sh
-perl -0777 -i -pe  's/(forkAndSpecializePre[\W\w]+?{[\W\w]+?)}/$1    fingerprintPre(env, appDataDir, niceName);\n}/'  $MODULE_TEMPLATE/module/src/main/cpp/main.cpp
-perl -0777 -i -pe  's/(forkAndSpecializePost[\W\w]+?{[\W\w]*?)}/$1    fingerprintPost(env, MAGISK_MODULE_TYPE_RIRU);\n    }/'  $MODULE_TEMPLATE/module/src/main/cpp/main.cpp
-perl -0777 -i -pe  's/(specializeAppProcessPre[\W\w]+?{[\W\w]+?)}/$1    fingerprintPre(env, appDataDir, niceName);\n}/'  $MODULE_TEMPLATE/module/src/main/cpp/main.cpp
-perl -0777 -i -pe  's/(specializeAppProcessPost[\W\w]+?{[\W\w]+?)}/$1    fingerprintPost(env, MAGISK_MODULE_TYPE_RIRU);\n}/'  $MODULE_TEMPLATE/module/src/main/cpp/main.cpp
-perl -0777 -i -pe  's/^/#include "fingerprint.h"\n/'  $MODULE_TEMPLATE/module/src/main/cpp/main.cpp
-perl -i -pe  's/(main\.cpp)/$1 fingerprint.cpp zygisk_main.cpp resource_extractor.cpp crc32.cpp/g'  $MODULE_TEMPLATE/module/src/main/cpp/CMakeLists.txt
-perl -0777 -i -pe 's/find_program\(CRC32_COMMAND crc32\)[\W\w]+?add_definitions\(-DRESOURCE_CRC32=0x\$\{RESOURCE_CRC32\}\)/include("\${CMAKE_CURRENT_SOURCE_DIR}\/resource_crc32.cmake")/' "$MODULE_TEMPLATE/module/src/main/cpp/CMakeLists.txt"
-$MODULE_TEMPLATE/gradlew -p $MODULE_TEMPLATE clean \
-  -PVERSION_NAME=$VERSION_NAME \
-  -PVERSION_CODE=$VERSION_CODE \
-  -PPLUGIN_TYPE_NAME=$PLUGIN_TYPE_NAME \
-  -PMODULE_LIB_NAME=$MODULE_LIB_NAME \
-
-$MODULE_TEMPLATE/gradlew -p $MODULE_TEMPLATE $MODULE_GRALDE_TASK \
-  -PVERSION_NAME=$VERSION_NAME \
-  -PVERSION_CODE=$VERSION_CODE \
-  -PPLUGIN_TYPE_NAME=$PLUGIN_TYPE_NAME \
-  -PMODULE_LIB_NAME=$MODULE_LIB_NAME \
-
-if [ ! -d "./build/release" ]; then mkdir -p "./build/release"; fi
-find $MODULE_TEMPLATE/out -name "*.zip" | xargs -I{} bash -c "cp -fv {} ./build/release/\$(basename {})"
-ZIPNAME=$(ls $MODULE_TEMPLATE/out/ | grep -E "\.zip$" | head -n1 | sed  -E 's/-[A-Za-z]+-v/-all-v/g')
-CURRENT_DIR="$PWD"
-cd "$MODULE_TEMPLATE/out"
-zip -u "$CURRENT_DIR/build/release/$ZIPNAME" *.zip
-cd "$CURRENT_DIR/src/installer"
-zip -ur "$CURRENT_DIR/build/release/$ZIPNAME" * || true
-cd "$CURRENT_DIR"
-bash ./reset.sh
-
+set -euo pipefail
+cd "$(dirname "$0")"
+[ "$(uname -s)" = Linux ] || { echo 'Use the remote Linux builder'; exit 1; }
+MODULE_GRADLE_TASK="${1:-:module:assembleRelease}"
+[ "$#" -le 1 ] || { echo "Usage: $0 [Gradle task]"; exit 1; }
+PLUGIN_TYPE_NAME=Zygisk
+FINGERPRINT_ROOT="$(cd .. && pwd)"
+FRAMEWORK=zygisk
+MODULE_TEMPLATE="$PWD/build/template-$FRAMEWORK-all"
+MODULE_LIB_NAME="$FRAMEWORK-module-xfingerprint-pay-all"
+PAYLOAD_VARIANT=Release
+case "$MODULE_GRADLE_TASK" in
+  *Debug*) PAYLOAD_VARIANT=Debug ;;
+esac
+VERSION_NAME=$(sed -n 's/.*versionName "\([^"]*\)".*/\1/p' ../app/build.gradle | head -1)
+VERSION_CODE=$(sed -n 's/.*versionCode \([0-9]*\).*/\1/p' ../app/build.gradle | head -1)
+bash build-sodium.sh
+bash ../gradlew -p .. ":app:export${PAYLOAD_VARIANT}Payload"
+python3 prepare-payload.py "../app/build/outputs/payload/${PAYLOAD_VARIANT,,}/payload.apk" build/payload
+python3 - "$FINGERPRINT_ROOT" "$MODULE_TEMPLATE" "$FRAMEWORK" "$MODULE_LIB_NAME" <<'PY'
+import pathlib,shutil,sys
+root,out,framework,name=sys.argv[1:];root=pathlib.Path(root);out=pathlib.Path(out)
+source=root/'3rdparty/MagiskModuleTemplate'
+cpp=out/'module/src/main/cpp';cpp.mkdir(parents=True,exist_ok=True)
+shutil.copy2(source/'module/src/main/AndroidManifest.xml',out/'module/src/main/AndroidManifest.xml')
+mod=out/'template/magisk_module'
+if mod.exists():shutil.rmtree(mod)
+mod.mkdir(parents=True)
+for n in ['verify.sh','module.prop']:shutil.copy2(source/'template/magisk_module'/n,mod/n)
+shutil.copytree(source/'template/magisk_module/META-INF',mod/'META-INF',dirs_exist_ok=True)
+(out/'gradle/wrapper').mkdir(parents=True,exist_ok=True)
+for n in ['gradlew','gradlew.bat','gradle.properties']:shutil.copy2(root/n,out/n)
+for p in (root/'gradle/wrapper').iterdir():shutil.copy2(p,out/'gradle/wrapper'/p.name)
+for n in ['settings','build']:shutil.copy2(root/f'module/src/gradle/template-{n}.gradle',out/f'{n}.gradle')
+shutil.copy2(root/'module/src/gradle/template-module.gradle',out/'module/build.gradle')
+shutil.copy2(root/'module/src/gradle/all.gradle',out/'module.gradle')
+for p in (root/'module/src/cpp').iterdir():
+    if p.is_file():shutil.copy2(p,out/'module/src/main/cpp'/p.name)
+mod=out/'template/magisk_module'
+for p in (root/'module/src/common').iterdir():shutil.copy2(p,mod/p.name)
+(mod/'customize.sh').write_text('FRAMEWORK='+framework+'\nMODULE_LIB_NAME='+name+'\n'+(root/'module/src/installer/customize.sh').read_text())
+shutil.copytree(root/'module/webui/dist',mod/'webroot',dirs_exist_ok=True)
+shutil.copy2(root/'module/build/payload/resources.apk',mod/'resources.apk')
+shutil.copy2(root/'module/build/payload/manifest.json',mod/'payload-manifest.json')
+PY
+"$MODULE_TEMPLATE/gradlew" -p "$MODULE_TEMPLATE" "$MODULE_GRADLE_TASK" -PfingerprintRoot="$FINGERPRINT_ROOT" \
+  -PVERSION_NAME="$VERSION_NAME" -PVERSION_CODE="$VERSION_CODE" -PPLUGIN_TYPE_NAME="$PLUGIN_TYPE_NAME" -PMODULE_LIB_NAME="$MODULE_LIB_NAME"
+mkdir -p build/release
+cp "$MODULE_TEMPLATE"/out/*.zip build/release/

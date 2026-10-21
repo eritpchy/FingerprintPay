@@ -3,27 +3,22 @@ package com.surcumference.fingerprint.plugin.impl.taobao;
 import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_TAOBAO;
 
 import android.app.Activity;
+import com.surcumference.fingerprint.util.PaymentPasswordGuard;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.*;
 import android.text.TextUtils;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.EditText;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.hjq.toast.Toaster;
-import com.surcumference.fingerprint.BuildConfig;
 import com.surcumference.fingerprint.Lang;
 import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
@@ -34,17 +29,15 @@ import com.surcumference.fingerprint.util.ApplicationUtils;
 import com.surcumference.fingerprint.util.BizBiometricIdentify;
 import com.surcumference.fingerprint.util.BlackListUtils;
 import com.surcumference.fingerprint.util.Config;
-import com.surcumference.fingerprint.util.DpUtils;
-import com.surcumference.fingerprint.util.StyleUtils;
 import com.surcumference.fingerprint.util.TaobaoVersionControl;
 import com.surcumference.fingerprint.util.Task;
+import com.surcumference.fingerprint.util.PaymentController;
+import com.surcumference.fingerprint.util.ActivityContext;
 import com.surcumference.fingerprint.util.ViewUtils;
 import com.surcumference.fingerprint.util.XBiometricIdentify;
-import com.surcumference.fingerprint.util.drawable.XDrawable;
 import com.surcumference.fingerprint.util.log.L;
 import com.surcumference.fingerprint.view.AlipayPayView;
 import com.surcumference.fingerprint.view.DialogUtils;
-import com.surcumference.fingerprint.view.SettingsView;
 import com.wei.android.lib.fingerprintidentify.bean.FingerprintIdentifyFailInfo;
 
 import java.util.ArrayList;
@@ -52,16 +45,19 @@ import java.util.List;
 
 public class TaobaoBasePlugin implements IAppPlugin {
 
+
     private AlertDialog mFingerPrintAlertDialog;
     private int mPwdActivityReShowDelayTimeMsec;
 
-    private LinearLayout mItemHlinearLayout;
-    private LinearLayout mLineTopCon;
-    private View mLineBottomView;
 
     private XBiometricIdentify mFingerprintIdentify;
 
     private Activity mCurrentActivity;
+    private final PaymentController mPayment = new PaymentController();
+    private long mActivityGeneration;
+    private final List<Runnable> mLayoutCleanup = new ArrayList<>();
+    private Task.Handle mPaymentMethodTask;
+    private final List<Task.Handle> mActivityTasks = new ArrayList<>();
 
     private boolean mIsViewTreeObserverFirst;
     private int mTaobaoVersionCode = 0;
@@ -80,17 +76,18 @@ public class TaobaoBasePlugin implements IAppPlugin {
     @Override
     public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {
         L.d("activity", activity);
-        handleSettingsMenuInjection(activity);
     }
 
     @Override
     public void onActivityPaused(Activity activity) {
-        //Xposed not hooked yet!
+        if (mPayment.isAuthenticating(activity) && mFingerprintIdentify != null
+                && mFingerprintIdentify.isUsingBiometricApi()) return;
+        closePayment(activity);
     }
 
     @Override
     public void onActivityStopped(@NonNull Activity activity) {
-        //Xposed not hooked yet!
+        closePayment(activity);
     }
 
     @Override
@@ -100,7 +97,7 @@ public class TaobaoBasePlugin implements IAppPlugin {
 
     @Override
     public void onActivityDestroyed(@NonNull Activity activity) {
-        //Xposed not hooked yet!
+        closePayment(activity);
     }
 
     @Override
@@ -118,23 +115,22 @@ public class TaobaoBasePlugin implements IAppPlugin {
         try {
             final String activityClzName = activity.getClass().getName();
             L.d("activity", activity, "clz", activityClzName);
+            if (mCurrentActivity != activity) closePayment(mCurrentActivity);
+            clearActivityObservers();
             mCurrentActivity = activity;
+            final long activityGeneration = ++mActivityGeneration;
             int versionCode = getVersionCode(activity);
             if (activityClzName.contains(".PayPwdDialogActivity")
                     || activityClzName.contains(".MspContainerActivity")
                     || activityClzName.contains(".FlyBirdWindowActivity")) {
                 L.d("found");
-                final Config config = Config.from(activity);
-                if (!config.isOn()) {
-                    return;
-                }
                 if (mFingerprintIdentifyTemporaryBlocking) {
                     return;
                 }
                 mIsViewTreeObserverFirst = true;
                 View rootView = activity.getWindow().getDecorView();
-                rootView.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-                    if (mCurrentActivity == null) {
+                watchLayout(rootView, () -> {
+                    if (activityGeneration != mActivityGeneration || mCurrentActivity == null) {
                         return;
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
@@ -151,7 +147,9 @@ public class TaobaoBasePlugin implements IAppPlugin {
                     boolean isNormalPay = ViewUtils.isShown(ViewUtils.findViewByText(rootView,
                             "支付宝支付密码", "支付寶支付密碼", "Alipay Payment Password", //兼容上一版本的支付组件, 参考 10.28.10(473)
                             "请输入长密码", "請輸入長密碼", "Payment Password"))
-                            || ViewUtils.isShown(ViewUtils.findViewByText(rootView,"密码共6位，已输入0位"));
+                            || (com.surcumference.fingerprint.util.ShortPasswordTarget.find(rootView) != null
+                            && com.surcumference.fingerprint.util.DigitKeyResolver.resolve(rootView,
+                            TaobaoVersionControl.getDigitPasswordKeyPad(versionCode), "0123456789") != null);
                     if (isRechargePay || isNormalPay) {
                         if (mIsViewTreeObserverFirst) {
                             mIsViewTreeObserverFirst = false;
@@ -163,15 +161,11 @@ public class TaobaoBasePlugin implements IAppPlugin {
 
             } else if (activityClzName.contains("PayPwdHalfActivity")) {
                 L.d("found");
-                final Config config = Config.from(activity);
-                if (!config.isOn()) {
-                    return;
-                }
                 if (mFingerprintIdentifyTemporaryBlocking) {
                     return;
                 }
-                activity.getWindow().getDecorView().setAlpha(0);
-                Task.onMain(1500, () -> {
+                mActivityTasks.add(Task.onMain(1500, () -> {
+                    if (activityGeneration != mActivityGeneration || !ActivityContext.isAlive(activity)) return;
                     TaobaoVersionControl.DigitPasswordKeyPad digitPasswordKeyPad = TaobaoVersionControl.getDigitPasswordKeyPad(mTaobaoVersionCode);
                     View key1View = ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key1);
                     if (key1View != null) {
@@ -180,43 +174,29 @@ public class TaobaoBasePlugin implements IAppPlugin {
                     }
 
                     //try again
-                    Task.onMain(2000, () -> showFingerPrintDialog(activity));
-                });
-            } else if (versionCode >= 323 /** 9.20.0 */ && handleSettingsMenuInjection(activity)) {
-                return;
+                    mActivityTasks.add(Task.onMain(2000, () -> {
+                        if (activityGeneration == mActivityGeneration && ActivityContext.isAlive(activity)) showFingerPrintDialog(activity);
+                    }));
+                }));
             }
         } catch (Exception e) {
             L.e(e);
         }
-    }
-
-    protected boolean handleSettingsMenuInjection(Activity activity) {
-        try {
-            final String activityClzName = activity.getClass().getName();
-            if (BuildConfig.DEBUG) {
-                L.d("activity", activity, "clz", activityClzName);
-            }
-            if (activityClzName.contains(".NewPaySettingsActivity")
-                    || activityClzName.contains(".NewTaobaoSettingActivity") // <- 这个命名真是SB, 再改版一次估计你要叫 NewNewTaobaoSettingActivity 了吧
-                    || activityClzName.contains(".TaobaoSettingActivity")) {
-                Task.onMain(250, () -> doSettingsMenuInject(activity)); // 100 -> 250, 这个改版的页面加载性能还没上一版好
-                Task.onMain(1000, () -> doSettingsMenuInject(activity)); // try again
-                return true;
-            }
-        } catch (Exception e) {
-            L.e(e);
-        }
-        return false;
     }
 
     public void initFingerPrintLock(final Context context,
                                     AlertDialog dialog, String passwordEncrypted,
                                     final OnFingerprintVerificationOKListener onSuccessUnlockCallback) {
-        mFingerprintIdentify = new BizBiometricIdentify(context)
-                .decryptPasscode(passwordEncrypted, new BizBiometricIdentify.IdentifyListener() {
+        final long token = mPayment.token();
+        if (!mPayment.isActive(token)) return;
+        BizBiometricIdentify authentication = new BizBiometricIdentify(context);
+        mFingerprintIdentify = authentication;
+        mPayment.authentication(token, authentication);
+        authentication.decryptPasscode(passwordEncrypted, new BizBiometricIdentify.IdentifyListener() {
 
                     @Override
                     public void onInited(BizBiometricIdentify identify) {
+                        if (!mPayment.isActive(token)) { identify.cancelIdentify(); return; }
                         super.onInited(identify);
                         if (identify.isUsingBiometricApi()) {
                             ViewUtils.setAlpha(dialog, 0);
@@ -230,13 +210,14 @@ public class TaobaoBasePlugin implements IAppPlugin {
                     @Override
                     public void onDecryptionSuccess(BizBiometricIdentify identify, @NonNull String decryptedContent) {
                         super.onDecryptionSuccess(identify, decryptedContent);
-                        onSuccessUnlockCallback.onFingerprintVerificationOK(decryptedContent);
+                        if (mPayment.authenticated(token)) onSuccessUnlockCallback.onFingerprintVerificationOK(decryptedContent);
                     }
 
                     @Override
                     public void onFailed(BizBiometricIdentify target, FingerprintIdentifyFailInfo failInfo) {
                         super.onFailed(target, failInfo);
-                        if (dialog != null) {
+                        if (mPayment.owns(token)) mPayment.finish(token, SystemClock.uptimeMillis());
+                        if (mPayment.owns(token) && dialog != null) {
                             ViewUtils.setAlpha(dialog, 1);
                             ViewUtils.setDimAmount(dialog, 0.6f);
                             if (dialog.isShowing()) {
@@ -248,55 +229,54 @@ public class TaobaoBasePlugin implements IAppPlugin {
     }
 
     public void showFingerPrintDialog(final Activity activity) {
+        if (mCurrentActivity != activity || !ActivityContext.isAlive(activity)) return;
         final Context context = activity;
         final Config config = Config.from(context);
         try {
             String passwordEncrypted = config.getPasswordEncrypted();
-            if (TextUtils.isEmpty(passwordEncrypted) || TextUtils.isEmpty(config.getPasswordIV())) {
-                Toaster.showLong(Lang.getString(R.id.toast_password_not_set_taobao));
-                return;
+            View paymentTarget = findPasswordEditText(activity);
+            if (paymentTarget == null) {
+                TaobaoVersionControl.DigitPasswordKeyPad keypad = TaobaoVersionControl.getDigitPasswordKeyPad(getVersionCode(activity));
+                paymentTarget = ViewUtils.findViewByName(activity, keypad.modulePackageName, keypad.key1);
             }
+            if (paymentTarget == null || !PaymentPasswordGuard.ready(config, paymentTarget) || !mPayment.begin(activity, paymentTarget, SystemClock.uptimeMillis())) return;
+            final long token = mPayment.token();
+            mPayment.restoreWith(token, this::releasePaymentObjects);
             mPwdActivityReShowDelayTimeMsec = 0;
             reEnteredPayDialogSolution(activity);
+            OnFingerprintVerificationOKListener onSuccess = password -> {
+                BlackListUtils.applyIfNeeded(context);
+
+                if (!mPayment.isActive(token)) return;
+                Runnable complete = () -> {
+                    mPwdActivityReShowDelayTimeMsec = 1000;
+                    mPayment.finish(token, SystemClock.uptimeMillis());
+                };
+                try {
+                    if (tryInputGenericPassword(activity, password)) complete.run();
+                    else if (!mPayment.inputDigits(token, activity.getWindow().getDecorView(),
+                            TaobaoVersionControl.getDigitPasswordKeyPad(getVersionCode(activity)), password, complete)) {
+                        Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
+                        complete.run();
+                    }
+                } catch (Exception error) { L.e(error); complete.run(); }
+            };
+            if (config.isUnderDisplayFingerprint()) {
+                mPayment.bindToPaymentWindow(token, activity.getWindow(), config.isVolumeDownMonitorEnabled(), () -> {
+                    mFingerprintIdentifyTemporaryBlocking = true;
+                    Toaster.showLong(Lang.getString(R.id.toast_fingerprint_temporary_disabled));
+                    Task.onBackground(60000, () -> mFingerprintIdentifyTemporaryBlocking = false);
+                });
+                mPayment.protectDigits(token, paymentTarget.getRootView(),
+                        TaobaoVersionControl.getDigitPasswordKeyPad(getVersionCode(activity)));
+                initFingerPrintLock(context, null, passwordEncrypted, onSuccess);
+                return;
+            }
             AlipayPayView alipayPayView = new AlipayPayView(context)
                     .withOnShowListener((target) -> {
                         AlertDialog dialog = target.getDialog();
-                        initFingerPrintLock(context, dialog, passwordEncrypted, (password) -> {
-                            BlackListUtils.applyIfNeeded(context);
-
-                            Runnable onCompleteRunnable = () -> {
-                                mPwdActivityReShowDelayTimeMsec = 1000;
-                                DialogUtils.dismiss(mFingerPrintAlertDialog);
-                            };
-
-                            if (!tryInputGenericPassword(activity, password)) {
-                                boolean tryAgain = false;
-                                try {
-                                    inputDigitPassword(activity, password);
-                                } catch (NullPointerException e) {
-                                    tryAgain = true;
-                                } catch (Exception e) {
-                                    Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                                    L.e(e);
-                                }
-                                if (tryAgain) {
-                                    Task.onMain(1000, ()-> {
-                                        try {
-                                            inputDigitPassword(activity, password);
-                                        } catch (NullPointerException e) {
-                                            Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                                        } catch (Exception e) {
-                                            Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                                            L.e(e);
-                                        }
-                                        onCompleteRunnable.run();
-                                    });
-                                    return;
-                                }
-                            }
-                            onCompleteRunnable.run();
-                        });
-                        // 无需反注册， 作用域仅限于Dialog Window
+                        initFingerPrintLock(context, dialog, passwordEncrypted, onSuccess);
+                        // Dialog window owns the volume listener.
                         if (config.isVolumeDownMonitorEnabled()) {
                             ViewUtils.registerVolumeKeyDownEventListener(dialog.getWindow(), event -> {
                                 if (mFingerprintIdentifyTemporaryBlocking) {
@@ -312,6 +292,8 @@ public class TaobaoBasePlugin implements IAppPlugin {
             }).withOnCancelButtonClickListener(target -> {
                 DialogUtils.dismiss(target.getDialog());
             }).withOnDismissListener(v -> {
+                if (!mPayment.owns(token)) return;
+                mPayment.finish(token, SystemClock.uptimeMillis());
                 XBiometricIdentify fingerprintIdentify = mFingerprintIdentify;
                 if (fingerprintIdentify != null) {
                     fingerprintIdentify.cancelIdentify();
@@ -320,9 +302,43 @@ public class TaobaoBasePlugin implements IAppPlugin {
             AlertDialog fingerPrintAlertDialog = alipayPayView.showInDialog();
             ViewUtils.setAlpha(fingerPrintAlertDialog, 0);
             ViewUtils.setDimAmount(fingerPrintAlertDialog, 0);
-            mFingerPrintAlertDialog = fingerPrintAlertDialog;
+            if (mPayment.isActive(token)) mFingerPrintAlertDialog = fingerPrintAlertDialog;
+            else DialogUtils.dismiss(fingerPrintAlertDialog);
         } catch (OutOfMemoryError e) {
         }
+    }
+
+    private void watchLayout(View view, ViewTreeObserver.OnGlobalLayoutListener listener) {
+        view.getViewTreeObserver().addOnGlobalLayoutListener(listener);
+        mLayoutCleanup.add(() -> {
+            if (view.getViewTreeObserver().isAlive()) view.getViewTreeObserver().removeOnGlobalLayoutListener(listener);
+        });
+    }
+
+    private void clearActivityObservers() {
+        for (Runnable cleanup : mLayoutCleanup) cleanup.run();
+        mLayoutCleanup.clear();
+        for (Task.Handle task : mActivityTasks) task.cancel();
+        mActivityTasks.clear();
+        if (mPaymentMethodTask != null) mPaymentMethodTask.cancel();
+        mPaymentMethodTask = null;
+    }
+
+    private void closePayment(Activity activity) {
+        if (activity == null || (mPayment.owner() != activity && mCurrentActivity != activity)) return;
+        if (mPayment.owner() == activity) releasePaymentObjects();
+        mPayment.close(activity);
+        if (mCurrentActivity == activity) { clearActivityObservers(); mCurrentActivity = null; ++mActivityGeneration; }
+        ActivityViewObserverHolder.stop(ActivityViewObserverHolder.Key.TaobaoPasswordView);
+    }
+
+    private void releasePaymentObjects() {
+        XBiometricIdentify identify = mFingerprintIdentify;
+        mFingerprintIdentify = null;
+        AlertDialog dialog = mFingerPrintAlertDialog;
+        mFingerPrintAlertDialog = null;
+        if (identify != null) identify.cancelIdentify();
+        DialogUtils.dismiss(dialog);
     }
 
     private void setupPaymentItemOnClickListener(ViewGroup rootView) {
@@ -348,9 +364,8 @@ public class TaobaoBasePlugin implements IAppPlugin {
                         if (dialog == null) {
                             return;
                         }
-                        if (!dialog.isShowing()) {
-                            dialog.show();
-                        }
+                        mPayment.close(activityFromView(v));
+                        DialogUtils.dismiss(dialog);
                     } finally {
                         View.OnClickListener originPaymentMethodListener = (View.OnClickListener) v.getTag(R.id.alipay_payment_method_item_click_listener);
                         if (originPaymentMethodListener != null && originPaymentMethodListener != this) {
@@ -361,6 +376,8 @@ public class TaobaoBasePlugin implements IAppPlugin {
             });
         }
     }
+
+    private Activity activityFromView(View view) { return ActivityContext.find(view.getContext()); }
 
     private void reEnteredPayDialogSolution(Activity activity) {
         int versionCode = getVersionCode(activity);
@@ -376,204 +393,28 @@ public class TaobaoBasePlugin implements IAppPlugin {
             if (view != null) {
                 outViewList.add(view);
             }
-            View shortPwdView = ViewUtils.findViewByText(rootView, "密码共6位，已输入0位");
+            View shortPwdView = com.surcumference.fingerprint.util.ShortPasswordTarget.find(rootView);
             if (ViewUtils.isShown(shortPwdView)) {
                 outViewList.add(shortPwdView);
             }
         });
-        ActivityViewObserverHolder.start(ActivityViewObserverHolder.Key.AlipayPasswordView,
+        ActivityViewObserverHolder.start(ActivityViewObserverHolder.Key.TaobaoPasswordView,
                 activityViewObserver, 300, (observer, view) -> {
                     ActivityViewObserverHolder.stop(observer);
                     L.d("找到密码框", view);
-                    Object debounceToken = new Object();
-                    Handler debounceHandler = view.getHandler();
-                    view.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
-                        debounceHandler.removeCallbacksAndMessages(debounceToken);
-                        debounceHandler.postAtTime(() -> {
-                            setupPaymentItemOnClickListener(rootView);
-                        }, debounceToken, SystemClock.uptimeMillis() + 666);
+                    long generation = mActivityGeneration;
+                    watchLayout(view, () -> {
+                        if (mPaymentMethodTask != null) mPaymentMethodTask.cancel();
+                        mPaymentMethodTask = Task.onMain(666, () -> {
+                            if (generation == mActivityGeneration && mCurrentActivity == activity
+                                    && ActivityContext.isAlive(activity)) setupPaymentItemOnClickListener(rootView);
+                        });
                     });
                 },
                 10000);
     }
 
-    /**
-     * 感觉是淘宝出bug了, 控件的id 和Resources 获取到的id 不符
-     */
     @Nullable
-    private View findTaobaoVSettingsPageItemView(@NonNull ViewGroup rootView) {
-        List<View> childViewList = new ArrayList<>();
-        ViewUtils.getChildViews(rootView, childViewList);
-        String packageName = rootView.getContext().getPackageName();
-        String identifier = packageName + ":id/v_setting_page_item} ";
-        ViewUtils.sortViewListByYPosition(childViewList);
-        for (View childView: childViewList) {
-            if (ViewUtils.getViewInfo(childView).contains(identifier)) {
-                if (childView.isShown()) {
-                    return childView;
-                }
-            }
-        }
-        return null;
-    }
-
-    private void doSettingsMenuInject(final Activity activity) {
-        ViewGroup rootView = (ViewGroup) activity.getWindow().getDecorView();
-        if (ViewUtils.findViewByText(rootView, Lang.getString(R.id.app_settings_name)) != null) {
-            return;
-        }
-        View itemView = ViewUtils.findViewByName(activity, activity.getPackageName(), "v_setting_page_item", "pay_setting_page_item");
-        if (itemView == null) {
-            itemView = findTaobaoVSettingsPageItemView(rootView);
-        }
-        LinearLayout linearLayout = (LinearLayout) itemView.getParent();
-        linearLayout.setPadding(0, 0, 0, 0);
-        List<ViewGroup.LayoutParams> childViewParamsList = new ArrayList<>();
-        List<View> childViewList = new ArrayList<>();
-        int childViewCount = linearLayout.getChildCount();
-        for (int i = 0; i < childViewCount; i++) {
-            View view = linearLayout.getChildAt(i);
-            childViewList.add(view);
-            childViewParamsList.add(view.getLayoutParams());
-        }
-
-        linearLayout.removeAllViews();
-
-        if (mLineTopCon == null) {
-            mLineTopCon = new LinearLayout(activity);
-        } else {
-            ViewUtils.removeFromSuperView(mLineTopCon);
-        }
-        mLineTopCon.setPadding(DpUtils.dip2px(activity, 12), 0, 0, 0);
-        mLineTopCon.setBackgroundColor(Color.WHITE);
-
-        View lineTopView = new View(activity);
-        lineTopView.setBackgroundColor(0xFFDFDFDF);
-        mLineTopCon.addView(lineTopView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1));
-
-        if (mItemHlinearLayout == null) {
-            mItemHlinearLayout = new LinearLayout(activity);
-        } else {
-            ViewUtils.removeFromSuperView(mItemHlinearLayout);
-            mItemHlinearLayout.removeAllViews();
-        }
-        mItemHlinearLayout.setOrientation(LinearLayout.HORIZONTAL);
-        mItemHlinearLayout.setWeightSum(1);
-        mItemHlinearLayout.setBackground(new XDrawable.Builder().defaultColor(Color.WHITE).create());
-        mItemHlinearLayout.setGravity(Gravity.CENTER_VERTICAL);
-        mItemHlinearLayout.setClickable(true);
-        mItemHlinearLayout.setOnClickListener(view -> new SettingsView(activity).showInDialog());
-
-
-        TextView itemNameText = new TextView(activity);
-
-        int defHPadding = DpUtils.dip2px(activity, 13);
-        itemNameText.setTextColor(0xFF051B28);
-        itemNameText.setText(Lang.getString(R.id.app_settings_name));
-        itemNameText.setGravity(Gravity.CENTER_VERTICAL);
-        itemNameText.setPadding(defHPadding, 0, 0, 0);
-        itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_BIG);
-
-        TextView itemSummerText = new TextView(activity);
-        StyleUtils.apply(itemSummerText);
-        itemSummerText.setText(BuildConfig.VERSION_NAME);
-        itemSummerText.setGravity(Gravity.CENTER_VERTICAL);
-        itemSummerText.setPadding(0, 0, defHPadding, 0);
-        itemSummerText.setTextColor(0xFF999999);
-
-        //try use Taobao style
-        try {
-            View generalView = ViewUtils.findViewByText(activity.getWindow().getDecorView(), "通用", "General", "人脸/指纹支付");
-            L.d("generalView", generalView);
-            if (generalView instanceof TextView) {
-                TextView generalTextView = (TextView) generalView;
-                float scale = itemNameText.getTextSize() / generalTextView.getTextSize();
-                itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_PX, generalTextView.getTextSize());
-                itemSummerText.setTextSize(TypedValue.COMPLEX_UNIT_PX, itemSummerText.getTextSize() / scale);
-                itemNameText.setTextColor(generalTextView.getCurrentTextColor());
-            }
-        } catch (Exception e) {
-            L.e(e);
-        }
-
-        mItemHlinearLayout.addView(itemNameText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        mItemHlinearLayout.addView(itemSummerText, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        if (mLineBottomView == null) {
-            mLineBottomView = new View(activity);
-        } else {
-            ViewUtils.removeFromSuperView(mLineBottomView);
-        }
-        mLineBottomView.setBackgroundColor(0xFFDFDFDF);
-
-        for (int i = 0; i < childViewCount; i++) {
-            View view = childViewList.get(i);
-            ViewGroup.LayoutParams params = childViewParamsList.get(i);
-            linearLayout.addView(view, params);
-        }
-
-        linearLayout.addView(mLineTopCon, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        linearLayout.addView(mItemHlinearLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, DpUtils.dip2px(activity, 44)));
-        LinearLayout.LayoutParams lineParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1);
-        lineParams.bottomMargin = DpUtils.dip2px(activity, 10);
-        linearLayout.addView(mLineBottomView, lineParams);
-    }
-
-    private void inputDigitPassword(Activity activity, String password) {
-        TaobaoVersionControl.DigitPasswordKeyPad digitPasswordKeyPad = TaobaoVersionControl.getDigitPasswordKeyPad(mTaobaoVersionCode);
-        View ks[] = new View[] {
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key1),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key2),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key3),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key4),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key5),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key6),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key7),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key8),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key9),
-                ViewUtils.findViewByName(activity, digitPasswordKeyPad.modulePackageName, digitPasswordKeyPad.key0),
-        };
-        char[] chars = password.toCharArray();
-        for (char c : chars) {
-            View v;
-            switch (c) {
-                case '1':
-                    v = ks[0];
-                    break;
-                case '2':
-                    v = ks[1];
-                    break;
-                case '3':
-                    v = ks[2];
-                    break;
-                case '4':
-                    v = ks[3];
-                    break;
-                case '5':
-                    v = ks[4];
-                    break;
-                case '6':
-                    v = ks[5];
-                    break;
-                case '7':
-                    v = ks[6];
-                    break;
-                case '8':
-                    v = ks[7];
-                    break;
-                case '9':
-                    v = ks[8];
-                    break;
-                case '0':
-                    v = ks[9];
-                    break;
-                default:
-                    continue;
-            }
-            ViewUtils.performActionClick(v);
-        }
-    }
-
     private boolean tryInputGenericPassword(Activity activity, String password) {
         EditText pwdEditText = findPasswordEditText(activity);
         if (pwdEditText == null) {

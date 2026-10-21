@@ -7,6 +7,7 @@ public class UpdateInfo {
     public String url;
     public String name;
     public long size;
+    public String digest;
 
     public UpdateInfo(String version, String content, String pageUrl, String url, String name, long size) {
         this.version = version;

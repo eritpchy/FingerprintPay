@@ -29,10 +29,6 @@ public class XWindowCallback implements Window.Callback {
         }
     }
 
-    public void removeKeyEventListener(OnKeyEventListener listener) {
-        keyEventListeners.remove(listener);
-    }
-
     @Override
     public boolean dispatchKeyEvent(KeyEvent keyEvent) {
         for (OnKeyEventListener listener : keyEventListeners) {

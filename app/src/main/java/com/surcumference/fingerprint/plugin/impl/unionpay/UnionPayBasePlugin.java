@@ -3,31 +3,19 @@ package com.surcumference.fingerprint.plugin.impl.unionpay;
 import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_UNIONPAY;
 
 import android.app.Activity;
+import com.surcumference.fingerprint.util.PaymentPasswordGuard;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.content.res.ColorStateList;
-import android.graphics.Color;
-import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
-import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
-import android.widget.AbsListView;
-import android.widget.FrameLayout;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.fragment.app.FragmentActivity;
 
 import com.hjq.toast.Toaster;
-import com.surcumference.fingerprint.BuildConfig;
 import com.surcumference.fingerprint.Lang;
 import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
@@ -39,23 +27,29 @@ import com.surcumference.fingerprint.util.ApplicationUtils;
 import com.surcumference.fingerprint.util.BizBiometricIdentify;
 import com.surcumference.fingerprint.util.BlackListUtils;
 import com.surcumference.fingerprint.util.Config;
-import com.surcumference.fingerprint.util.DpUtils;
-import com.surcumference.fingerprint.util.StyleUtils;
 import com.surcumference.fingerprint.util.Task;
+import com.surcumference.fingerprint.util.PaymentController;
+import com.surcumference.fingerprint.util.ActivityContext;
+import com.surcumference.fingerprint.bean.DigitPasswordKeyPadInfo;
+import android.os.SystemClock;
 import com.surcumference.fingerprint.util.ViewUtils;
 import com.surcumference.fingerprint.util.XBiometricIdentify;
 import com.surcumference.fingerprint.util.log.L;
 import com.surcumference.fingerprint.view.AlipayPayView;
 import com.surcumference.fingerprint.view.DialogUtils;
-import com.surcumference.fingerprint.view.SettingsView;
 import com.wei.android.lib.fingerprintidentify.bean.FingerprintIdentifyFailInfo;
 
 import java.util.Map;
 import java.util.WeakHashMap;
 
 public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
+    private long mActivityGeneration;
+    private Activity mWatchingActivity;
+    private Task.Handle mObserverRestart;
+
 
     private AlertDialog mFingerPrintAlertDialog;
+    private final PaymentController mPayment = new PaymentController();
     private WeakHashMap<View, View.OnAttachStateChangeListener> mView2OnAttachStateChangeListenerMap = new WeakHashMap<>();
     protected boolean mMockCurrentUser = false;
     protected XBiometricIdentify mFingerprintIdentify;
@@ -77,12 +71,16 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
     protected synchronized void initFingerPrintLock(Context context,
                                                     AlertDialog dialog, String passwordEncrypted,
                                                     OnFingerprintVerificationOKListener onSuccessUnlockCallback) {
+        final long token = mPayment.token();
+        if (!mPayment.isActive(token)) return;
         L.d("指纹识别开始");
-        mFingerprintIdentify = new BizBiometricIdentify(context)
-                .withMockCurrentUserCallback(this)
-                .decryptPasscode(passwordEncrypted, new BizBiometricIdentify.IdentifyListener() {
+        BizBiometricIdentify authentication = new BizBiometricIdentify(context).withMockCurrentUserCallback(this);
+        mFingerprintIdentify = authentication;
+        mPayment.authentication(token, authentication);
+        authentication.decryptPasscode(passwordEncrypted, new BizBiometricIdentify.IdentifyListener() {
                     @Override
                     public void onInited(BizBiometricIdentify identify) {
+                        if (!mPayment.isActive(token)) { identify.cancelIdentify(); return; }
                         super.onInited(identify);
                         if (identify.isUsingBiometricApi()) {
                             ViewUtils.setAlpha(dialog, 0);
@@ -96,12 +94,14 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
                     @Override
                     public void onDecryptionSuccess(BizBiometricIdentify identify, @NonNull String decryptedContent) {
                         super.onDecryptionSuccess(identify, decryptedContent);
-                        onSuccessUnlockCallback.onFingerprintVerificationOK(decryptedContent);
+                        if (mPayment.authenticated(token)) onSuccessUnlockCallback.onFingerprintVerificationOK(decryptedContent);
                     }
 
                     @Override
                     public void onFailed(BizBiometricIdentify target, FingerprintIdentifyFailInfo failInfo) {
                         super.onFailed(target, failInfo);
+                        if (!mPayment.owns(token)) return;
+                        mPayment.finish(token, SystemClock.uptimeMillis());
                         if (dialog != null) {
                             ViewUtils.setAlpha(dialog, 1);
                             ViewUtils.setDimAmount(dialog, 0.6f);
@@ -114,43 +114,54 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
     }
 
     public synchronized void showFingerPrintDialog(@Nullable Activity activity, View targetView) {
+        if (activity == null) activity = ActivityContext.find(targetView.getContext());
+        final Activity owner = activity;
+        if (!ActivityContext.isAlive(owner) || !mActivityResumedMap.containsKey(owner)) return;
         View rootView = targetView.getRootView();
         final Context context = rootView.getContext();
         final Config config = Config.from(context);
         try {
+            if (!PaymentPasswordGuard.ready(config, targetView)) return;
             if ("true".equals(rootView.getTag(R.id.unionpay_payview_shown))) {
                 L.d("payview already shown, skip.");
                 return;
             }
-            ViewTreeObserver.OnGlobalLayoutListener paymentMethodListener = new ViewTreeObserver.OnGlobalLayoutListener() {
-                @Override
-                public void onGlobalLayout() {
-                    View selectPaymentMethodView = ViewUtils.findViewByText(rootView, "选择付款方式", "Select payment method");
-                    L.d("selectPaymentMethodView", ViewUtils.getViewInfo(selectPaymentMethodView));
-                    if (selectPaymentMethodView == null) {
-                        showFingerPrintDialog(activity, targetView);
-                    }
-                }
-            };
-
-            //监视选择付款页面, 并保证只有一个listener
-            ViewTreeObserver.OnGlobalLayoutListener lastPaymentMethodListener = (ViewTreeObserver.OnGlobalLayoutListener)targetView.getTag(R.id.unionpay_payment_method_listener);
-            if (lastPaymentMethodListener != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-                    targetView.getViewTreeObserver().removeOnGlobalLayoutListener(lastPaymentMethodListener);
-                }
-            }
-            targetView.getViewTreeObserver().addOnGlobalLayoutListener(paymentMethodListener);
-            targetView.setTag(R.id.unionpay_payment_method_listener, paymentMethodListener);
+            watchPaymentMethod(owner, targetView, rootView);
 
             rootView.setTag(R.id.unionpay_payview_shown, "true");
             String passwordEncrypted = config.getPasswordEncrypted();
-            if (TextUtils.isEmpty(passwordEncrypted) || TextUtils.isEmpty(config.getPasswordIV())) {
-                Toaster.showLong(Lang.getString(R.id.toast_password_not_set_generic));
-                rootView.setTag(R.id.unionpay_payview_shown, null);
-                return;
+            if (!mPayment.begin(owner, targetView, SystemClock.uptimeMillis())) {
+                rootView.setTag(R.id.unionpay_payview_shown, null); return;
             }
             hidePreviousPayDialog();
+            final long token = mPayment.token();
+            mPayment.restoreWith(token, () -> {
+                rootView.setTag(R.id.unionpay_payview_shown, null);
+                releasePaymentObjects();
+            });
+            OnFingerprintVerificationOKListener onSuccess = password -> {
+                BlackListUtils.applyIfNeeded(context);
+
+                if (!mPayment.isActive(token)) return;
+                DigitPasswordKeyPadInfo keys = new DigitPasswordKeyPadInfo(PACKAGE_NAME_UNIONPAY,
+                        null, null, null, null, null, null, null, null, null, null);
+                if (!mPayment.inputDigits(token, rootView, keys, password,
+                        () -> mPayment.finish(token, SystemClock.uptimeMillis()))) {
+                    Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
+                    mPayment.finish(token, SystemClock.uptimeMillis());
+                }
+            };
+            if (config.isUnderDisplayFingerprint()) {
+                mPayment.bindToPaymentWindow(token, owner.getWindow(), config.isVolumeDownMonitorEnabled(), () -> {
+                    mFingerprintIdentifyTemporaryBlocking = true;
+                    Toaster.showLong(Lang.getString(R.id.toast_fingerprint_temporary_disabled));
+                    Task.onBackground(60000, () -> mFingerprintIdentifyTemporaryBlocking = false);
+                });
+                mPayment.protectDigits(token, rootView, new DigitPasswordKeyPadInfo(PACKAGE_NAME_UNIONPAY,
+                        null, null, null, null, null, null, null, null, null, null));
+                initFingerPrintLock(context, null, passwordEncrypted, onSuccess);
+                return;
+            }
             boolean dialogMode = false;
             View payRootLayout = ViewUtils.findViewByName(rootView, PACKAGE_NAME_UNIONPAY, "fl_container");
             L.d("payRootLayout", payRootLayout);
@@ -164,18 +175,10 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
             AlipayPayView payView = new AlipayPayView(context)
                     .withOnCancelButtonClickListener(target -> {
                     DialogUtils.dismiss(target.getDialog());
-                    if (finalDialogMode) {
-                    Task.onBackground(100, () -> {
-                        Task.onMain(500, () -> {
-                            //窗口消失了
-                            if (ViewUtils.isViewVisibleInScreen(rootView) == false) {
-                                return;
-                            }
-                            retryWatchPayViewIfPossible(activity, rootView, 10, 500);
-                        });
-                    });
-                }
+                    mPayment.finish(token, SystemClock.uptimeMillis());
             }).withOnDismissListener(v -> {
+                if (!mPayment.owns(token)) return;
+                mPayment.finish(token, SystemClock.uptimeMillis());
                 XBiometricIdentify fingerprintIdentify = mFingerprintIdentify;
                 if (fingerprintIdentify != null) {
                     fingerprintIdentify.cancelIdentify();
@@ -186,7 +189,7 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
                 ViewUtils.setAlpha(target.getDialog(), 0);
                 ViewUtils.setDimAmount(target.getDialog(), 0);
                 //for hidePreviousPayDialog
-                Task.onMain(250, () -> {
+                mPayment.later(token, 250, () -> {
                     //窗口消失了
                     if (ViewUtils.isViewVisibleInScreen(rootView) == false) {
                         return;
@@ -194,38 +197,8 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
                     AlertDialog dialog = target.getDialog();
                     ViewUtils.setAlpha(dialog, 1);
                     ViewUtils.setDimAmount(dialog, 0.6f);
-                    initFingerPrintLock(context, dialog, passwordEncrypted, (password) -> {
-                        BlackListUtils.applyIfNeeded(context);
-
-                        Runnable onCompleteRunnable = () ->  DialogUtils.dismiss(mFingerPrintAlertDialog);
-
-                        boolean tryAgain = false;
-                        try {
-                            inputDigitPassword(rootView, password);
-                        } catch (NullPointerException e) {
-                            tryAgain = true;
-                        } catch (Exception e) {
-                            Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                            L.e(e);
-                        }
-                        if (tryAgain) {
-                            Task.onMain(1000, () -> {
-                                try {
-                                    inputDigitPassword(rootView, password);
-                                } catch (NullPointerException e) {
-                                    Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                                    L.d("inputDigitPassword NPE", e);
-                                } catch (Exception e) {
-                                    Toaster.showLong(Lang.getString(R.id.toast_password_auto_enter_fail));
-                                    L.e(e);
-                                }
-                                onCompleteRunnable.run();
-                            });
-                            return;
-                        }
-                        onCompleteRunnable.run();
-                    });
-                    // 无需反注册， 作用域仅限于Dialog Window
+                    initFingerPrintLock(context, dialog, passwordEncrypted, onSuccess);
+                    // Dialog window owns the volume listener.
                     if (config.isVolumeDownMonitorEnabled()) {
                         ViewUtils.registerVolumeKeyDownEventListener(dialog.getWindow(), event -> {
                             if (mFingerprintIdentifyTemporaryBlocking) {
@@ -250,12 +223,14 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
             AlertDialog fingerPrintAlertDialog = payView.showInDialog();
             ViewUtils.setAlpha(fingerPrintAlertDialog, 0);
             ViewUtils.setDimAmount(fingerPrintAlertDialog, 0);
-            mFingerPrintAlertDialog = fingerPrintAlertDialog;
+            if (mPayment.isActive(token)) mFingerPrintAlertDialog = fingerPrintAlertDialog;
+            else DialogUtils.dismiss(fingerPrintAlertDialog);
         } catch (OutOfMemoryError e) {
         }
     }
 
     private void retryWatchPayViewIfPossible(Activity activity, View rootView, int countDown, int delayMS) {
+        if (!ActivityContext.isAlive(activity) || !mActivityResumedMap.containsKey(activity)) return;
         View payTitleTextView = ViewUtils.findViewByText(rootView, "请输入支付密码", "Input payment password");
         if (payTitleTextView == null
                 || !(ViewUtils.isViewVisibleInScreen(payTitleTextView) && ViewUtils.isShownInScreen(payTitleTextView))) {
@@ -263,60 +238,6 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
         }
         if (countDown > 0) {
             Task.onMain(delayMS, () -> retryWatchPayViewIfPossible(activity, rootView, countDown - 1, delayMS));
-        }
-    }
-
-    private void inputDigitPassword(View rootView, String password) {
-        View ks[] = new View[] {
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "1"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "2"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "3"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "4"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "5"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "6"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "7"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "8"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "9"),
-                ViewUtils.findViewByText(rootView, PACKAGE_NAME_UNIONPAY, "0"),
-        };
-        char[] chars = password.toCharArray();
-        for (char c : chars) {
-            View v;
-            switch (c) {
-                case '1':
-                    v = ks[0];
-                    break;
-                case '2':
-                    v = ks[1];
-                    break;
-                case '3':
-                    v = ks[2];
-                    break;
-                case '4':
-                    v = ks[3];
-                    break;
-                case '5':
-                    v = ks[4];
-                    break;
-                case '6':
-                    v = ks[5];
-                    break;
-                case '7':
-                    v = ks[6];
-                    break;
-                case '8':
-                    v = ks[7];
-                    break;
-                case '9':
-                    v = ks[8];
-                    break;
-                case '0':
-                    v = ks[9];
-                    break;
-                default:
-                    continue;
-            }
-            ViewUtils.performActionClick(v);
         }
     }
 
@@ -332,10 +253,6 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
         final String activityClzName = activity.getClass().getName();
         if (activityClzName.contains(".UPActivityReactNative")) {
 
-            ActivityViewObserver activityViewObserver = new ActivityViewObserver(activity);
-            activityViewObserver.setViewIdentifyText("通用设置");
-            activityViewObserver.start(100, (observer, view) -> doSettingsMenuInject(activity));
-            Task.onBackground(2000, activityViewObserver::stop);
             watchPayView(activity);
         } else if (activityClzName.contains(".PayWalletActivity")) {
             watchPayView(activity);
@@ -349,8 +266,30 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
 
     @Override
     public void onActivityPaused(Activity activity) {
-        L.d("Activity onPause =", activity);
+        if (mPayment.isAuthenticating(activity) && mFingerprintIdentify != null
+                && mFingerprintIdentify.isUsingBiometricApi()) return;
+        closePayment(activity);
+    }
+
+    private void closePayment(Activity activity) {
         mActivityResumedMap.remove(activity);
+        if (activity == null || (mPayment.owner() != activity && mWatchingActivity != activity)) return;
+        ++mActivityGeneration;
+        mWatchingActivity = null;
+        if (mObserverRestart != null) mObserverRestart.cancel();
+        mObserverRestart = null;
+        java.util.Iterator<java.util.Map.Entry<View, View.OnAttachStateChangeListener>> entries = mView2OnAttachStateChangeListenerMap.entrySet().iterator();
+        while (entries.hasNext()) {
+            java.util.Map.Entry<View, View.OnAttachStateChangeListener> entry = entries.next();
+            if (ActivityContext.find(entry.getKey().getContext()) == activity) {
+                entry.getKey().removeOnAttachStateChangeListener(entry.getValue());
+                removePaymentMethodListener(entry.getKey());
+                entries.remove();
+            }
+        }
+        L.d("Activity onPause =", activity);
+        if (mPayment.owner() == activity) releasePaymentObjects();
+        mPayment.close(activity);
         final String activityClzName = activity.getClass().getName();
         if (activityClzName.contains(".UPActivityReactNative")) {
             hidePreviousPayDialog();
@@ -362,7 +301,7 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
 
     @Override
     public void onActivityStopped(@NonNull Activity activity) {
-        //Xposed not hooked yet!
+        closePayment(activity);
     }
 
     @Override
@@ -372,7 +311,7 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
 
     @Override
     public void onActivityDestroyed(@NonNull Activity activity) {
-        //Xposed not hooked yet!
+        closePayment(activity);
     }
 
     @Override
@@ -387,12 +326,14 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
     }
 
     private void watchPayView(Activity activity) {
-        if (!Config.from(activity).isOn()) {
+        if (!Config.from(activity).isInScope()) {
             return;
         }
         if (mFingerprintIdentifyTemporaryBlocking) {
             return;
         }
+        mWatchingActivity = activity;
+        final long generation = ++mActivityGeneration;
         ActivityViewObserver activityViewObserver = new ActivityViewObserver(activity);
         activityViewObserver.setViewIdentifyText("请输入支付密码", "Input payment password");
         activityViewObserver.setWatchActivityViewOnly(true);
@@ -400,6 +341,7 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
                 100, new ActivityViewObserver.IActivityViewListener() {
             @Override
             public void onViewFounded(ActivityViewObserver observer, View view) {
+                if (generation != mActivityGeneration) return;
                 //跳过没有显示的view, 云闪付专属
                 if (!ViewUtils.isViewVisibleInScreen(view)) {
                     L.d("skip invisible view", ViewUtils.getViewInfo(view));
@@ -439,7 +381,13 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
                         L.d("onViewDetachedFromWindow:", view);
                         Context context = v.getContext();
                         onPayDialogDismiss(context);
-                        Task.onMain(500, () -> observer.start(100, l));
+                        view.removeOnAttachStateChangeListener(this);
+                        removePaymentMethodListener(view);
+                        mView2OnAttachStateChangeListenerMap.remove(view);
+                        mObserverRestart = Task.onMain(500, () -> {
+                            if (generation == mActivityGeneration && ActivityContext.isAlive(activity)
+                                    && mActivityResumedMap.containsKey(activity)) watchPayView(activity);
+                        });
                     }
                 };
                 view.addOnAttachStateChangeListener(listener);
@@ -454,6 +402,7 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
     }
 
     protected void onPayDialogDismiss(Context context) {
+        mPayment.close(ActivityContext.find(context));
         L.d("PayDialog dismiss");
         if (!Config.from(context).isOn()) {
             return;
@@ -466,115 +415,45 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
         mMockCurrentUser = false;
     }
 
-    protected void doSettingsMenuInject(final Activity activity) {
-
-        View rootView = activity.getWindow().getDecorView();
-        if (ViewUtils.findViewByText(rootView, Lang.getString(R.id.app_settings_name)) != null) {
-            return;
-        }
-        View genericSettingsView = ViewUtils.findViewByText(rootView, "通用设置");
-        if (genericSettingsView == null) {
-            return;
-        }
-        View paySettingsView = ViewUtils.findViewByText(rootView, "支付设置");
-        if (paySettingsView == null) {
-            return;
-        }
-        ViewGroup upReactView = ViewUtils.findParentViewByClassNamePart(paySettingsView, ".UPReactView");
-
-        View paySettingsParentView = (View)paySettingsView.getParent().getParent().getParent();
-        L.d("FragmentActivity", activity instanceof FragmentActivity);
-        L.d("paySettingsView", paySettingsView);
-        L.d("paySettingsParentView", paySettingsParentView);
-        L.d("upReactView", upReactView);
-        int appendHeight = 70;
-        int childCount = ((ViewGroup) paySettingsParentView.getParent()).getChildCount();
-        L.d("((ViewGroup)paySettingsParentView.getParent()).getChildCount()", childCount);
-        for (int i = 0; i < childCount; i++) {
-            View view = ((ViewGroup) paySettingsParentView.getParent()).getChildAt(i);
-            view.setTop(view.getTop() + DpUtils.dip2px(activity, appendHeight));
-            view.setBottom(view.getBottom() + DpUtils.dip2px(activity, appendHeight));
-        }
-        ((View)paySettingsParentView.getParent()).setBottom(((View)paySettingsParentView.getParent()).getBottom() + DpUtils.dip2px(activity, appendHeight));
-        boolean isDarkMode = false;
-
-        FrameLayout settingsItemRootContainer = new FrameLayout(activity);
-        LinearLayout settingsItemRootLLayout = new LinearLayout(activity);
-        settingsItemRootLLayout.setOrientation(LinearLayout.VERTICAL);
-        settingsItemRootLLayout.setLayoutParams(new AbsListView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        settingsItemRootLLayout.setPadding(0, DpUtils.dip2px(activity, 20), 0, 0);
-
-        LinearLayout settingsItemLinearLayout = new LinearLayout(activity);
-        settingsItemLinearLayout.setOrientation(LinearLayout.VERTICAL);
-
-        settingsItemLinearLayout.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout itemHlinearLayout = new LinearLayout(activity);
-        itemHlinearLayout.setOrientation(LinearLayout.HORIZONTAL);
-        itemHlinearLayout.setWeightSum(1);
-
-        itemHlinearLayout.setBackgroundColor(isDarkMode ? 0xFF191919 : Color.WHITE);
-        itemHlinearLayout.setGravity(Gravity.CENTER_VERTICAL);
-        itemHlinearLayout.setClickable(true);
-        itemHlinearLayout.setOnClickListener(view -> new SettingsView(activity).showInDialog());
-
-        TextView itemNameText = new TextView(activity);
-        itemNameText.setTextColor(new ColorStateList(
-                new int[][]{{android.R.attr.state_pressed},{-android.R.attr.state_pressed}},
-                new int[]{0xFFD6D6D6, isDarkMode ? 0xFFD3D3D3 : 0xFF353535}));
-        itemNameText.setText(Lang.getString(R.id.app_settings_name));
-        itemNameText.setGravity(Gravity.CENTER_VERTICAL);
-        itemNameText.setPadding(DpUtils.dip2px(activity, 15), 0, 0, 0);
-        itemNameText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16.0f);
-
-        TextView itemSummerText = new TextView(activity);
-        StyleUtils.apply(itemSummerText);
-        itemSummerText.setText(BuildConfig.VERSION_NAME);
-        itemSummerText.setGravity(Gravity.CENTER_VERTICAL);
-        itemSummerText.setPadding(0, 0, DpUtils.dip2px(activity, 20), 0);
-        itemSummerText.setTextColor(new ColorStateList(
-                new int[][]{{android.R.attr.state_pressed},{-android.R.attr.state_pressed}},
-                new int[]{0xFFD6D6D6, isDarkMode ? 0xFF656565 : 0xFF999999}));
-
-        itemHlinearLayout.addView(itemNameText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
-        itemHlinearLayout.addView(itemSummerText, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        settingsItemLinearLayout.addView(itemHlinearLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, DpUtils.dip2px(activity, 55)));
-
-        settingsItemRootLLayout.addView(settingsItemLinearLayout, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        settingsItemRootLLayout.setTag(BuildConfig.APPLICATION_ID);
-
-        settingsItemRootContainer.addView(settingsItemRootLLayout, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        // 滚动跟随
-        ScrollView scrollView = ViewUtils.findParentViewByClass(paySettingsView, ScrollView.class);
-        scrollView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> settingsItemRootLLayout.setTop(-scrollY));
-
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.topMargin = DpUtils.dip2px(activity, 45);
-        upReactView.addView(settingsItemRootContainer, params);
-
-        // 切换至关爱版
-        rootView.getViewTreeObserver().addOnDrawListener(() -> {
-            int outLocation[] = new int[2];
-            scrollView.getLocationInWindow(outLocation);
-            settingsItemRootLLayout.setLeft(outLocation[0]);
-            boolean isGlobalVisible = ((View) genericSettingsView).getGlobalVisibleRect(new Rect());
-            if (!isGlobalVisible) {
-                if (settingsItemRootContainer.getVisibility() != View.GONE) {
-                    settingsItemRootContainer.setVisibility(View.GONE);
-                }
-            } else {
-                if (settingsItemRootContainer.getVisibility() != View.VISIBLE) {
-                    settingsItemRootContainer.setVisibility(View.VISIBLE);
-                }
-            }
-            settingsItemRootLLayout.setTop(-scrollView.getScrollY());
-        });
-    }
-
     private void hidePreviousPayDialog() {
         L.d("hidePreviousPayDialog", mFingerPrintAlertDialog);
-        DialogUtils.dismiss(mFingerPrintAlertDialog);
+        AlertDialog dialog = mFingerPrintAlertDialog;
         mFingerPrintAlertDialog = null;
+        DialogUtils.dismiss(dialog);
+    }
+
+    private void releasePaymentObjects() {
+        XBiometricIdentify identify = mFingerprintIdentify;
+        mFingerprintIdentify = null;
+        if (identify != null) identify.cancelIdentify();
+        hidePreviousPayDialog();
+    }
+
+    private void watchPaymentMethod(Activity owner, View targetView, View rootView) {
+        removePaymentMethodListener(targetView);
+        ViewTreeObserver.OnGlobalLayoutListener listener = new ViewTreeObserver.OnGlobalLayoutListener() {
+            private boolean selecting;
+            @Override public void onGlobalLayout() {
+                if (!ActivityContext.isAlive(owner) || targetView.getWindowToken() == null
+                        || !mActivityResumedMap.containsKey(owner)) return;
+                View selection = ViewUtils.findViewByText(rootView, "选择付款方式", "Select payment method");
+                boolean visible = selection != null && selection.isShown() && ViewUtils.isViewVisibleInScreen(selection)
+                        && ViewUtils.isShownInScreen(selection);
+                if (selecting == visible) return;
+                selecting = visible;
+                if (visible) mPayment.close(owner);
+                else showFingerPrintDialog(owner, targetView);
+            }
+        };
+        targetView.getViewTreeObserver().addOnGlobalLayoutListener(listener);
+        targetView.setTag(R.id.unionpay_payment_method_listener, listener);
+    }
+
+    private void removePaymentMethodListener(View view) {
+        Object listener = view.getTag(R.id.unionpay_payment_method_listener);
+        if (listener instanceof ViewTreeObserver.OnGlobalLayoutListener && view.getViewTreeObserver().isAlive()) {
+            view.getViewTreeObserver().removeOnGlobalLayoutListener((ViewTreeObserver.OnGlobalLayoutListener) listener);
+        }
+        view.setTag(R.id.unionpay_payment_method_listener, null);
     }
 }

@@ -1,0 +1,22 @@
+ext {
+    /*
+       This name will be used in the name of the so file ("lib${moduleLibraryName}.so").
+    */
+    moduleLibraryName = project.property("MODULE_LIB_NAME").toString()
+
+    /*
+       Magisk module ID
+       Since Magisk use it to distinguish different modules, you should never change it.
+
+       Note, the older version of the template uses '-' instead of '_', if your are upgrading from
+       the older version, please pay attention.
+    */
+    magiskModuleId = moduleLibraryName.toString()
+    def pluginTypeName = project.property("PLUGIN_TYPE_NAME").toString()
+    moduleName = "${pluginTypeName.capitalize()} - 指纹支付"
+    moduleAuthor = "Jason Eric"
+    moduleDescription = "让微信、支付宝、淘宝、QQ、云闪付支持指纹支付 Fingerprint pay for WeChat, Alipay, Taobao, QQ and UnionPay."
+    moduleVersion = "v${project.property("VERSION_NAME")}"
+    moduleVersionCode = project.property("VERSION_CODE") as int
+    moduleUpdateJson = "https://gitee.com/eritpchy/FingerprintPay/raw/main/release/update_${pluginTypeName.toLowerCase()}_all.json"
+}

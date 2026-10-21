@@ -2,6 +2,7 @@
 #define CRC32_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 class CRC32 {
 public:
@@ -17,13 +18,7 @@ public:
     // 验证文件大小和CRC32是否匹配预期值
     static bool verifyFileSizeAndCRC32(const char* filename, size_t expected_size, uint32_t expected_crc);
 
-private:
-    // 初始化CRC32表
-    static void initCRC32Table();
-    
-    // CRC32表
-    static uint32_t crc32_table[256];
-    static bool table_initialized;
+
 };
 
 #endif // CRC32_H

@@ -2,7 +2,6 @@ package com.surcumference.fingerprint.util;
 
 import android.content.Context;
 import android.content.pm.PackageInfo;
-import android.os.Bundle;
 import android.os.UserManager;
 
 import com.surcumference.fingerprint.BuildConfig;
@@ -48,15 +47,4 @@ public class Tools {
         }
     }
 
-    public static String bundle2string(Bundle bundle) {
-        if (bundle == null) {
-            return null;
-        }
-        String string = "Bundle{";
-        for (String key : bundle.keySet()) {
-            string += " " + key + " => " + bundle.get(key) + ";";
-        }
-        string += " }Bundle";
-        return string;
-    }
 }

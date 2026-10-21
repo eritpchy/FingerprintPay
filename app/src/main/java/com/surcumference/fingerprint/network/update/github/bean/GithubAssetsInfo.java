@@ -14,4 +14,5 @@ public class GithubAssetsInfo {
     public String url;
 
     public long size;
+    public String digest;
 }

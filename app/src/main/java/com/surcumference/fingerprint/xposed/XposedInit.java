@@ -6,7 +6,7 @@ import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_TAOBAO;
 import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_UNIONPAY;
 import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_WECHAT;
 
-import android.annotation.TargetApi;
+import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.Application;
 import android.app.Instrumentation;
@@ -35,103 +35,78 @@ public class XposedInit implements IXposedHookZygoteInit, IXposedHookLoadPackage
 
 
     public void initZygote(StartupParam startupParam) throws Throwable {
+        com.surcumference.fingerprint.util.ModuleResources.setPayloadPath(startupParam.modulePath);
     }
 
     @Override
     public void handleLoadPackage(final LoadPackageParam lpparam) throws Throwable {
-        if (PACKAGE_NAME_WECHAT.equals(lpparam.packageName)) {
-            initWechat(lpparam);
-        } else if (PACKAGE_NAME_ALIPAY.equals(lpparam.packageName)) {
-            initAlipay(lpparam);
-        } else if (PACKAGE_NAME_TAOBAO.equals(lpparam.packageName)) {
-            initTaobao(lpparam);
-        } else if (PACKAGE_NAME_QQ.equals(lpparam.packageName)) {
-            initQQ(lpparam);
-        } else if (PACKAGE_NAME_UNIONPAY.equals(lpparam.packageName)) {
-            initUnionPay(lpparam);
+        if (BuildConfig.APPLICATION_ID.equals(lpparam.packageName)) {
+            XposedHelpers.findAndHookMethod("com.surcumference.fingerprint.storage.XposedActivation", lpparam.classLoader,
+                    "frameworkVersion", de.robv.android.xposed.XC_MethodReplacement.returnConstant(
+                            de.robv.android.xposed.XposedBridge.getXposedVersion()));
+            return;
         }
+        if (!com.surcumference.fingerprint.storage.ConfigContract.PACKAGES.contains(lpparam.packageName)) {
+            initGeneric(lpparam);
+            return;
+        }
+        String active = System.getProperty("fingerprintpay.active.backend");
+        if (active != null && !"Xposed".equals(active)) return;
+        com.surcumference.fingerprint.plugin.PluginApp.setup(com.surcumference.fingerprint.bean.PluginType.Xposed, null);
+        initHost(lpparam);
         initGeneric(lpparam);
     }
 
-    private void initUnionPay(LoadPackageParam lpparam) {
-        L.d("loaded: [" + lpparam.packageName + "]" + " version:" + BuildConfig.VERSION_NAME);
-        XposedHelpers.findAndHookMethod(Instrumentation.class, "callApplicationOnCreate", Application.class, new XC_MethodHook() {
-            @TargetApi(21)
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                L.d("Application onCreate");
-                Application application = (Application) param.args[0];
-                XposedPluginLoader.load(UnionPayPlugin.class, application, lpparam);
-            }
-        });
-
-    }
-
-    private void initWechat(final LoadPackageParam lpparam) {
-        L.d("loaded: [" + lpparam.packageName + "]" + " version:" + BuildConfig.VERSION_NAME);
-        XposedHelpers.findAndHookMethod(Instrumentation.class, "callApplicationOnCreate", Application.class, new XC_MethodHook() {
-            @TargetApi(21)
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                L.d("Application onCreate");
-                Application application = (Application) param.args[0];
-                XposedPluginLoader.load(WeChatPlugin.class, application, lpparam);
-            }
-        });
-    }
-
-    private void initAlipay(final LoadPackageParam lpparam) {
-        L.d("loaded: [" + lpparam.packageName + "]" + " version:" + BuildConfig.VERSION_NAME);
-        XposedHelpers.findAndHookMethod(Instrumentation.class, "callApplicationOnCreate", Application.class, new XC_MethodHook() {
-            private boolean mCalled = false;
-            @TargetApi(21)
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                L.d("Application onCreate");
-                if (mCalled == false) {
-                    mCalled = true;
-                    Application application = (Application) param.args[0];
-                    XposedPluginLoader.load(AlipayPlugin.class, application, lpparam);
-                }
-            }
-        });
-    }
-
-    private void initTaobao(final LoadPackageParam lpparam) {
-        L.d("loaded: [" + lpparam.packageName + "]" + " version:" + BuildConfig.VERSION_NAME);
-        XposedHelpers.findAndHookMethod(Instrumentation.class, "callApplicationOnCreate", Application.class, new XC_MethodHook() {
-            //受Atlas影响Application onCreate入口只需执行一次即可
-            private boolean mCalled = false;
-            @TargetApi(21)
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                L.d("Application onCreate");
-                if (mCalled == false) {
-                    mCalled = true;
-                    Application application = (Application) param.args[0];
-                    if (application == null) {
-                        L.d("context eq null what the hell.");
-                        return;
-                    }
-                    XposedPluginLoader.load(TaobaoPlugin.class, application, lpparam);
-                }
-            }
-        });
-    }
-
-    private void initQQ(final LoadPackageParam lpparam) {
-        if (!lpparam.isFirstApplication) {
-            return;
+    private void initHost(final LoadPackageParam lpparam) {
+        if (PACKAGE_NAME_QQ.equals(lpparam.packageName) && !lpparam.isFirstApplication) return;
+        Class<?> plugin;
+        switch (lpparam.packageName) {
+            case PACKAGE_NAME_WECHAT: plugin = WeChatPlugin.class; break;
+            case PACKAGE_NAME_ALIPAY: plugin = AlipayPlugin.class; break;
+            case PACKAGE_NAME_TAOBAO: plugin = TaobaoPlugin.class; break;
+            case PACKAGE_NAME_QQ: plugin = QQPlugin.class; break;
+            case PACKAGE_NAME_UNIONPAY: plugin = UnionPayPlugin.class; break;
+            default: return;
         }
-        L.d("loaded: [" + lpparam.packageName + "]" + " version:" + BuildConfig.VERSION_NAME);
+        L.d("loaded: [" + lpparam.packageName + "] version:" + BuildConfig.VERSION_NAME);
+        HostInitializer initializer = new HostInitializer(plugin, lpparam);
         XposedHelpers.findAndHookMethod(Instrumentation.class, "callApplicationOnCreate", Application.class, new XC_MethodHook() {
-            private boolean mCalled = false;
-            @TargetApi(21)
-            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                L.d("Application onCreate");
-                if (mCalled == false) {
-                    mCalled = true;
-                    Application application = (Application) param.args[0];
-                    XposedPluginLoader.load(QQPlugin.class, application, lpparam);
-                }
+            @Override protected void beforeHookedMethod(MethodHookParam param) {
+                initializer.initialize((Application) param.args[0]);
             }
         });
+        // Host Instrumentation overrides may bypass callApplicationOnCreate entirely.
+        de.robv.android.xposed.XposedBridge.hookAllMethods(Activity.class, "performResume", new XC_MethodHook() {
+            @Override protected void afterHookedMethod(MethodHookParam param) {
+                Activity activity = (Activity) param.thisObject;
+                if (initializer.initialize(activity.getApplication()))
+                    com.surcumference.fingerprint.storage.PasswordEnrollment.onHostResumed(activity);
+            }
+        });
+        XC_MethodHook pause = new XC_MethodHook() {
+            @Override protected void beforeHookedMethod(MethodHookParam param) {
+                com.surcumference.fingerprint.storage.PasswordEnrollment.onHostPaused((Activity) param.thisObject);
+            }
+        };
+        de.robv.android.xposed.XposedBridge.hookAllMethods(Activity.class, "performPause", pause);
+        de.robv.android.xposed.XposedBridge.hookAllMethods(Activity.class, "performDestroy", pause);
+    }
+
+    private static final class HostInitializer {
+        private final Class<?> plugin;
+        private final LoadPackageParam param;
+        private boolean loaded;
+        HostInitializer(Class<?> plugin, LoadPackageParam param) { this.plugin = plugin; this.param = param; }
+        boolean initialize(Application application) {
+            if (loaded) return true;
+            if (application == null) return false;
+            try {
+                XposedPluginLoader.load(plugin, application, param);
+                loaded = true;
+                android.util.Log.i("FingerprintPay", "Xposed host initialized: " + param.processName);
+            } catch (Throwable error) { L.e(error); }
+            return loaded;
+        }
     }
 
     private void initGeneric(final LoadPackageParam lpparam) {

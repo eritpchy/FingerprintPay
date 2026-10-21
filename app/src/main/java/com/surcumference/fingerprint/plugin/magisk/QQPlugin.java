@@ -10,7 +10,6 @@ import com.hjq.toast.Toaster;
 import com.surcumference.fingerprint.BuildConfig;
 import com.surcumference.fingerprint.Constant;
 import com.surcumference.fingerprint.bean.PluginTarget;
-import com.surcumference.fingerprint.bean.PluginType;
 import com.surcumference.fingerprint.network.update.UpdateFactory;
 import com.surcumference.fingerprint.plugin.PluginApp;
 import com.surcumference.fingerprint.plugin.PluginFactory;
@@ -36,15 +35,6 @@ public class QQPlugin {
         Task.onApplicationReady(() -> init(niceName));
     }
 
-    /**
-     * <= 4.0.1
-     * Note: 可能会导致降级后还显示上一个版本
-     */
-    @Keep
-    @Deprecated public static void main(String niceName) {
-        main(niceName, PluginType.Riru.name());
-    }
-
     public static void init(String niceName) {
         try {
             Application application = ApplicationUtils.getApplication();
@@ -66,22 +56,7 @@ public class QQPlugin {
                 && !niceName.contains(":")) {
                 UpdateFactory.lazyUpdateWhenActivityAlive();
             }
-            // for 8.8.83
-            boolean isToolProcess = niceName.endsWith(":tool");
-            if (isToolProcess) {
-                int versionCode = plugin.getVersionCode(application);
-                if (versionCode >= Constant.QQ.QQ_VERSION_CODE_8_8_83) {
-                    Activity activity = ApplicationUtils.getCurrentActivity();
-                    L.d("tool first activity", activity);
-                    if (activity != null) {
-                        if (activity.getClass().getName().contains(".QWalletToolFragmentActivity")) {
-                            Task.onMain(() -> plugin.onActivityResumed(activity));
-                        }
-                    }
-                }
-            }
-
-            application.registerActivityLifecycleCallbacks(plugin);
+            PluginFactory.register(application, plugin);
         } catch (Exception e) {
             L.e(e);
         }

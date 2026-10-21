@@ -34,11 +34,20 @@ public class UnionPayPlugin {
     public void main(final Application application, final XC_LoadPackage.LoadPackageParam lpparam) {
         L.d("Xposed plugin init version: " + BuildConfig.VERSION_NAME);
         try {
-            PluginApp.setup(PluginType.Xposed, PluginTarget.WeChat);
+            PluginApp.setup(PluginType.Xposed, PluginTarget.UnionPay);
             Toaster.init(application);
             Umeng.init(application);
             UpdateFactory.lazyUpdateWhenActivityAlive();
             IAppPlugin plugin = PluginFactory.loadPlugin(application, Constant.PACKAGE_NAME_UNIONPAY);
+            application.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+                @Override public void onActivityStopped(Activity activity) { plugin.onActivityStopped(activity); }
+                @Override public void onActivityDestroyed(Activity activity) { plugin.onActivityDestroyed(activity); }
+                @Override public void onActivityCreated(Activity activity, android.os.Bundle state) {}
+                @Override public void onActivityStarted(Activity activity) {}
+                @Override public void onActivityResumed(Activity activity) {}
+                @Override public void onActivityPaused(Activity activity) {}
+                @Override public void onActivitySaveInstanceState(Activity activity, android.os.Bundle state) {}
+            });
             XposedHelpers.findAndHookMethod(Instrumentation.class, "callActivityOnResume", Activity.class, new XC_MethodHook() {
                 @TargetApi(21)
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -53,7 +62,9 @@ public class UnionPayPlugin {
                     plugin.onActivityPaused((Activity) param.thisObject);
                 }
             });
+            com.surcumference.fingerprint.storage.XposedRuntime.install(application, true);
         } catch (Throwable l) {
+            try { com.surcumference.fingerprint.storage.XposedRuntime.install(application, false); } catch (Throwable ignored) {}
             L.e(l);
             XposedBridge.log(l);
         }

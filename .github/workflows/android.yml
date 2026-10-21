@@ -44,7 +44,7 @@ jobs:
           BUILD_TOOLS=$(sed -n 's/^buildToolsVersion=//p' gradle/android-toolchain.properties)
           NDK_VERSION=$(sed -n 's/^ndkVersion=//p' gradle/android-toolchain.properties)
           sdkmanager "platforms;android-36" "platforms;android-$SDK_PLATFORM.$SDK_MINOR" "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION" "cmake;3.22.1"
-      - name: Build Riru modules
+      - name: Build Zygisk five-app module
         run: cd ./module && bash ./make.sh
         env:
           BUILD_RELEASE_MINIFYENABLED: ${{ vars.BUILD_RELEASE_MINIFYENABLED }}
@@ -54,7 +54,7 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       - name: Build with Gradle
-        run:  ./gradlew clean && ./gradlew ":app:assembleRelease" -Pxposed=true
+        run:  ./gradlew clean && ./gradlew ":app:assembleRelease"
         env:
           BUILD_RELEASE_MINIFYENABLED: ${{ vars.BUILD_RELEASE_MINIFYENABLED }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
@@ -70,13 +70,18 @@ jobs:
         with:
           name: mapping.${{ steps.current-time.outputs.formattedTime }}
           path: app/build/outputs/mapping/release/mapping.txt
-      - name: Upload Riru Modules
+      - name: Upload WebUI dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui.${{ steps.current-time.outputs.formattedTime }}
+          path: module/webui/dist/
+      - name: Upload native modules
         uses: actions/upload-artifact@v4
         with:
           name: magisk.${{ steps.current-time.outputs.formattedTime }}
           path: |
-            module/build/release/*.zip
-            !module/build/release/*-all-*.zip
+            module/build/release/zygisk-module-xfingerprint-pay-all-*.zip
+
       - name: Assign release version from version.properties to Env variable
         run: |
           cat ./app/build.gradle| grep versionName | sed -E 's/.+"(.+)".*/release_version=\1/g' >> $GITHUB_ENV
@@ -94,7 +99,7 @@ jobs:
           name: "${{ env.release_version }}"
           tag_name: "${{ env.release_version }}-ci"
           files: |
-            module/build/release/*.zip
+            module/build/release/zygisk-module-xfingerprint-pay-all-*.zip
             app/build/outputs/apk/release/*.apk
             app/build/outputs/mapping/release/mapping.txt
           body: "[Github Action](https://github.com/${{github.repository}}/actions/runs/${{github.run_id}})"

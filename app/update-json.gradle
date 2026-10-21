@@ -1,18 +1,14 @@
 import groovy.json.JsonOutput
-project.ext.appInfo.each { entry ->
-    ['zygisk', 'riru'].each {pluginType ->
-        def name = entry.key.toLowerCase()
-        def versionName = android.defaultConfig.versionName
-        def info = [
-                version: "${versionName}",
-                versionCode: "${android.defaultConfig.versionCode}",
-                zipUrl: "https://file.xdow.net/d/download/fingerprintpay/$versionName/$pluginType-module-xfingerprint-pay-$name-v$versionName-release.zip",
-                changelog: "https://gitee.com/eritpchy/FingerprintPay/raw/main/CHANGELOG.md",
-        ]
 
-        def json_str = JsonOutput.toJson(info)
-        def json_beauty = JsonOutput.prettyPrint(json_str)
-        File file = rootProject.file("release/update_${pluginType}_${name}.json")
-        file.write(json_beauty)
+project.ext.moduleFrameworks.each { pluginType ->
+    def versionName = android.defaultConfig.versionName
+    def info = [
+        version: "${versionName}",
+        versionCode: "${android.defaultConfig.versionCode}",
+        zipUrl: "https://file.xdow.net/d/download/fingerprintpay/$versionName/$pluginType-module-xfingerprint-pay-all-v$versionName-release.zip",
+        changelog: "https://gitee.com/eritpchy/FingerprintPay/raw/main/CHANGELOG.md",
+    ]
+    (['all'] + project.ext.appInfo.keySet().collect { it.toLowerCase() }).each { name ->
+        rootProject.file("release/update_${pluginType}_${name}.json").text = JsonOutput.prettyPrint(JsonOutput.toJson(info)) + '\n'
     }
 }

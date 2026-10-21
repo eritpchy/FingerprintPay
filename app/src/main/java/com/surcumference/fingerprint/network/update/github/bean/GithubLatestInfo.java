@@ -12,9 +12,7 @@ import com.surcumference.fingerprint.util.log.L;
 
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.Callable;
 
 /**
  * Created by Jason on 2017/9/10.
@@ -40,16 +38,16 @@ public class GithubLatestInfo {
 
     @Nullable
     public GithubAssetsInfo getDownloadAssetsInfo() {
+        return getDownloadAssetsInfo(PluginApp.getCurrentType());
+    }
+
+    @Nullable
+    public GithubAssetsInfo getDownloadAssetsInfo(PluginType pluginType) {
         L.d("assets", new Gson().toJson(assets));
         if (assets.size() == 0) {
             return null;
         }
-        PluginType pluginType = PluginApp.getCurrentType();
-        String assetsMatchRegexRule = PluginApp.runActionBaseOnCurrentPluginType(new HashMap<PluginType, Callable<String>>(){{
-            put(PluginType.Riru, () -> "^" + pluginType.name() + ".+all.+zip$");
-            put(PluginType.Zygisk, () -> "^" + pluginType.name() + ".+all.+zip$");
-            put(PluginType.Xposed, () -> "^" + pluginType.name() + ".+apk$");
-        }});
+        String assetsMatchRegexRule = "^" + pluginType.name() + (pluginType == PluginType.Zygisk ? ".+all.+zip$" : ".+apk$");
         assetsMatchRegexRule = assetsMatchRegexRule.toLowerCase();
         L.d("assetsMatchRegexRule", assetsMatchRegexRule);
         for (GithubAssetsInfo asset : assets) {
@@ -65,7 +63,11 @@ public class GithubLatestInfo {
     }
 
     public boolean isDataComplete() {
-        GithubAssetsInfo downloadAssetsInfo = getDownloadAssetsInfo();
+        return isDataComplete(PluginApp.getCurrentType());
+    }
+
+    public boolean isDataComplete(PluginType type) {
+        GithubAssetsInfo downloadAssetsInfo = getDownloadAssetsInfo(type);
         if (downloadAssetsInfo == null) {
             L.d("downloadAssetsInfo == null");
             return false;

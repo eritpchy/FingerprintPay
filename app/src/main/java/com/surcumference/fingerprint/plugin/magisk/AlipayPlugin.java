@@ -8,7 +8,6 @@ import com.hjq.toast.Toaster;
 import com.surcumference.fingerprint.BuildConfig;
 import com.surcumference.fingerprint.Constant;
 import com.surcumference.fingerprint.bean.PluginTarget;
-import com.surcumference.fingerprint.bean.PluginType;
 import com.surcumference.fingerprint.network.update.UpdateFactory;
 import com.surcumference.fingerprint.plugin.PluginApp;
 import com.surcumference.fingerprint.plugin.PluginFactory;
@@ -33,16 +32,6 @@ public class AlipayPlugin {
         Task.onApplicationReady(AlipayPlugin::init);
     }
 
-    /**
-     * <= 4.0.1
-     * Note: 可能会导致降级后还显示上一个版本
-     */
-    @Keep
-    @Deprecated
-    public static void main(String niceName) {
-        main(niceName, PluginType.Riru.name());
-    }
-
     public static void init() {
         Application application = ApplicationUtils.getApplication();
         IAppPlugin plugin = PluginFactory.loadPlugin(application, Constant.PACKAGE_NAME_ALIPAY);
@@ -50,6 +39,6 @@ public class AlipayPlugin {
         Task.onMain(1000, ()-> Umeng.init(application));
 
         UpdateFactory.lazyUpdateWhenActivityAlive();
-        application.registerActivityLifecycleCallbacks(plugin);
+        PluginFactory.register(application, plugin);
     }
 }

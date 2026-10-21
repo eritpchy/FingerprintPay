@@ -1,0 +1,35 @@
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+
+def webUiDist = layout.projectDirectory.dir('module/webui/dist')
+tasks.register('verifyWebUi') {
+    inputs.dir(webUiDist)
+    doLast {
+        def directory = webUiDist.asFile
+        def manifestFile = new File(directory, 'manifest.json')
+        if (!manifestFile.isFile()) {
+            throw new GradleException('Missing WebUI dist. Build FingerprintPay-WebUI on Linux and sync its dist to module/webui/dist.')
+        }
+        def manifest = new JsonSlurper().parse(manifestFile)
+        def required = ['index.html', 'app.js', 'compat.js', 'sodium.js', 'host-insets.js', 'style.css', 'LICENSES.txt']
+        if (manifest.schema != 1 || manifest.target != 'ES5' || !(manifest.files instanceof Map)
+                || !manifest.files.keySet().containsAll(required)) {
+            throw new GradleException('Invalid WebUI manifest or missing runtime assets')
+        }
+        def actual = fileTree(directory).files.collect { directory.toPath().relativize(it.toPath()).toString().replace('\\', '/') }.toSet()
+        if (actual != (manifest.files.keySet() + ['manifest.json']).toSet()) {
+            throw new GradleException('WebUI dist contains missing or unlisted files')
+        }
+        manifest.files.each { name, info ->
+            def asset = new File(directory, name)
+            if (!asset.canonicalPath.startsWith(directory.canonicalPath + File.separator) || name.endsWith('.map')) {
+                throw new GradleException("Invalid WebUI asset: ${name}")
+            }
+            def bytes = asset.bytes
+            def digest = MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString()
+            if (bytes.length != info.bytes || digest != info.sha256) {
+                throw new GradleException("WebUI dist hash mismatch: ${name}. Rebuild and sync the complete dist.")
+            }
+        }
+    }
+}

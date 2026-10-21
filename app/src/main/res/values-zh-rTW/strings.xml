@@ -1,6 +1,4 @@
 <resources>
     <string name="app_name">指紋支付</string>
     <string name="app_description">讓帶指紋的手機支持微信、QQ、支付寶和淘寶的指紋支付</string>
-    <string name="generic_settings">一般</string>
-    <string name="settings_title_show_icon">顯示應用圖標</string>
 </resources>

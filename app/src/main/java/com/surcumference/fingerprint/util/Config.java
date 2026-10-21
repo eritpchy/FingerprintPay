@@ -2,160 +2,146 @@ package com.surcumference.fingerprint.util;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.provider.Settings;
-import android.text.TextUtils;
-
-import androidx.annotation.Nullable;
-
 import com.surcumference.fingerprint.BuildConfig;
-import com.surcumference.fingerprint.util.log.L;
-
-import java.util.WeakHashMap;
+import com.surcumference.fingerprint.plugin.PluginApp;
+import com.surcumference.fingerprint.storage.ConfigContract;
+import com.surcumference.fingerprint.storage.ConfigStore;
+import com.surcumference.fingerprint.storage.ConfigStores;
+import com.hjq.toast.Toaster;
+import org.json.JSONObject;
+import java.util.Locale;
 
 /**
  * Created by Jason on 2017/9/9.
  */
-
-public class Config {
-
-
-    private static WeakHashMap<Context, ObjectCache> sConfigCache = new WeakHashMap<>();
-
-    public static Config from(Context context) {
-        return new Config(context);
-    }
-
-    private ObjectCache mCache;
-
+public final class Config {
+    private final Context context;
+    private final String pkg;
+    private final ConfigStore store;
+    public static Config from(Context context) { return new Config(context); }
     private Config(Context context) {
-        if (sConfigCache.containsKey(context)) {
-            mCache = sConfigCache.get(context);
-        }
-        if (mCache == null) {
-            SharedPreferences sharedPreferences = context.getSharedPreferences(BuildConfig.APPLICATION_ID + ".settings", Context.MODE_PRIVATE);
-            String deviceId = Settings.System.getString(context.getContentResolver(), Settings.System.ANDROID_ID);
-            int passwordEncKey = String.valueOf(deviceId).hashCode();
-            SharedPreferences mainAppSharePreference;
-            try {
-                mainAppSharePreference = XPreferenceProvider.getRemoteSharedPreference(context);
-            } catch (Exception e) {
-                mainAppSharePreference = sharedPreferences;
-                L.e(e);
+        this.context = context;
+        pkg = ConfigContract.PACKAGES.contains(context.getPackageName()) ? context.getPackageName() : ConfigContract.PACKAGES.get(0);
+        store = ConfigStores.forContext(context);
+        migrate();
+    }
+    private JSONObject request(String op) throws Exception {
+        return new JSONObject().put("op", op).put("package", pkg).put("user", android.os.Process.myUid() / 100000);
+    }
+    private JSONObject read() throws Exception { return store.request(request("read")); }
+    public JSONObject snapshot() throws Exception { return read(); }
+    private void migrate() {
+        if (BuildConfig.APPLICATION_ID.equals(context.getPackageName())) return;
+        SharedPreferences old = context.getSharedPreferences(BuildConfig.APPLICATION_ID + ".settings", Context.MODE_PRIVATE);
+        if (old.getAll().isEmpty()) return;
+        try {
+            JSONObject current = read();
+            if (!current.getJSONObject("settings").optBoolean("migrated")) {
+                JSONObject values = new JSONObject();
+                for (String key : ConfigContract.OPTIONS) if (!"scope".equals(key) && !"switch_on1".equals(key) && old.contains(key)) values.put(key, old.getBoolean(key, false));
+                if (old.contains("license_agree")) values.put("license_agree", old.getBoolean("license_agree", false));
+                if (old.contains("skip_version")) values.put(skipKey(), old.getString("skip_version", ""));
+                store.request(request("migrate").put("revision", current.getLong("revision")).put("values", values));
             }
-            mCache = new ObjectCache(sharedPreferences, mainAppSharePreference, passwordEncKey);
-            sConfigCache.put(context, mCache);
+            SharedPreferences.Editor edit = old.edit();
+            for (String key : new String[]{"switch_on1", "password", "password_iv", "fingerprint_icon", "biometric_api",
+                    "volume_down_monitor_enabled", "skip_version", "license_agree"}) edit.remove(key);
+            if (edit.commit() && old.getAll().isEmpty()) {
+                if (android.os.Build.VERSION.SDK_INT >= 24) context.deleteSharedPreferences(BuildConfig.APPLICATION_ID + ".settings");
+                else {
+                    java.io.File file = new java.io.File(context.getApplicationInfo().dataDir, "shared_prefs/" + BuildConfig.APPLICATION_ID + ".settings.xml");
+                    file.delete(); new java.io.File(file.getPath() + ".bak").delete();
+                }
+            }
+            cleanupLegacyPayloads();
+            if (!current.getJSONObject("settings").optBoolean("migrated"))
+                Task.onMain(() -> android.widget.Toast.makeText(context, "配置已迁移，请重新录入支付密码后启用指纹支付", android.widget.Toast.LENGTH_LONG).show());
+        } catch (Exception ignored) { /* Keep the import source until the central store confirms it. */ }
+    }
+    private void cleanupLegacyPayloads() {
+        String[] apps = {"wechat", "alipay", "taobao", "qq", "unionpay"};
+        java.io.File directory = context.getFilesDir();
+        for (String framework : new String[]{"zygisk", "riru"}) for (String app : apps) {
+            for (String suffix : new String[]{".apk", ".dex", ".debug.apk", ".debug.apk.crc"}) {
+                java.io.File file = new java.io.File(directory, framework + "-module-xfingerprint-pay-" + app + suffix);
+                try { if (file.isFile() && file.getCanonicalPath().equals(file.getAbsolutePath())) file.delete(); }
+                catch (java.io.IOException ignored) {}
+            }
         }
     }
-
+    private boolean option(String key, boolean fallback) {
+        try { JSONObject value = read(); return value.getJSONObject(ConfigContract.global(key) ? "globals" : "settings").optBoolean(key, fallback); }
+        catch (Exception ignored) { return false; }
+    }
+    private void set(String key, Object value) {
+        try {
+            JSONObject valueNow = read(), values = new JSONObject().put(key, value);
+            if (Boolean.TRUE.equals(value)) {
+                if ("biometric_api".equals(key)) values.put("volume_down_monitor_enabled", false);
+                if ("volume_down_monitor_enabled".equals(key)) values.put("biometric_api", false);
+            }
+            store.request(request("patch").put("revision", valueNow.getLong("revision")).put("values", values));
+        }
+        catch (Exception ignored) { Toaster.showShort("配置保存失败，请检查配置服务并重试"); }
+    }
     public boolean isOn() {
-        return mCache.sharedPreferences.getBoolean("switch_on1", false);
+        try { JSONObject value = read(), settings = value.getJSONObject("settings");
+            return settings.optBoolean("scope") && settings.optBoolean("switch_on1") && settings.optBoolean("hasPassword")
+                    && value.getJSONObject("globals").optBoolean("license_agree"); }
+        catch (Exception ignored) { return false; }
     }
-
-    public void setOn(boolean on) {
-        mCache.sharedPreferences.edit().putBoolean("switch_on1", on).apply();
-    }
-
-    @Nullable
+    public boolean isInScope() { return option("scope", true); }
+    public void setInScope(boolean value) { set("scope", value); }
+    public boolean isPaymentEnabled() { return option("switch_on1", false); }
+    public void setOn(boolean value) { set("switch_on1", value); }
     public String getPasswordEncrypted() {
-        String enc = mCache.sharedPreferences.getString("password", null);
-        if (TextUtils.isEmpty(enc)) {
-            return null;
-        }
-        return AESUtils.decrypt(enc, String.valueOf(mCache.passwordEncKey));
+        try { JSONObject settings = read().getJSONObject("settings");
+            return settings.optBoolean("hasPassword") ? "tee-v2:" + settings.getLong("credentialVersion") : null; }
+        catch (Exception ignored) { return null; }
+    }
+    public String getPasswordIV() { return getPasswordEncrypted() == null ? null : "tee-v2"; }
+    public void setPasswordEncrypted(String value) { if (value == null || value.isEmpty()) { try { savePassword(""); } catch (Exception ignored) { Toaster.showShort("密码清除失败"); } } }
+    public String beginPassword(String value) throws Exception {
+        JSONObject current = read();
+        if (!value.isEmpty() && !ConfigContract.TEE_FORMAT.equals(current.optString("passwordProtection")))
+            throw new IllegalStateException("Update the module and restart before setting a password");
+        JSONObject result = store.request(request("password").put("revision", current.getLong("revision")).put("password", value));
+        return value.isEmpty() ? null : result.getJSONObject("pending").getString("id");
+    }
+    public void savePassword(String value) throws Exception {
+        if (!value.isEmpty()) throw new SecurityException("Use biometric TEE encryption");
+        beginPassword(value);
+    }
+    public String pendingPassword() throws Exception {
+        return store.request(request("pendingPassword")).getJSONObject("pending").optString("id", null);
+    }
+    public String claimPassword(String id) throws Exception { return store.request(request("claimPassword").put("id", id)).getString("password"); }
+    public void commitPassword(String id, JSONObject record) throws Exception {
+        JSONObject current = read();
+        store.request(request("commitPassword").put("revision", current.getLong("revision")).put("id", id).put("record", record));
+    }
+    public void cancelPassword(String id) { try { store.request(request("cancelPassword").put("id", id)); } catch (Exception ignored) {} }
+    public JSONObject passwordRecord(String token) throws Exception {
+        if (token == null || !token.startsWith("tee-v2:")) throw new IllegalArgumentException("Please set the password again");
+        return store.request(request("credential").put("credentialVersion", Long.parseLong(token.substring(7)))).getJSONObject("record");
+    }
+    public void checkCredential(String token) throws Exception {
+        if (!isOn() || !token.equals(getPasswordEncrypted())) throw new SecurityException("Password changed or payment disabled");
     }
 
-    public void setPasswordEncrypted(String password) {
-        String enc = AESUtils.encrypt(password, String.valueOf(mCache.passwordEncKey));
-        mCache.sharedPreferences.edit().putString("password", enc).apply();
-    }
-
-    @Nullable
-    public String getPasswordIV() {
-        String enc = mCache.sharedPreferences.getString("password_iv", null);
-        if (TextUtils.isEmpty(enc)) {
-            return null;
-        }
-        return AESUtils.decrypt(enc, String.valueOf(mCache.passwordEncKey));
-    }
-
-    public void setPasswordIV(String iv) {
-        if (TextUtils.isEmpty(iv)) {
-            mCache.sharedPreferences.edit().remove("password_iv").apply();
-            return;
-        }
-        String enc = AESUtils.encrypt(iv, String.valueOf(mCache.passwordEncKey));
-        mCache.sharedPreferences.edit().putString("password_iv", enc).apply();
-    }
-
-    public String getPasswordEncKey() {
-        return String.valueOf(mCache.passwordEncKey);
-    }
-
-    public boolean isShowFingerprintIcon() {
-        return mCache.sharedPreferences.getBoolean("fingerprint_icon", false);
-    }
-
-    public void setShowFingerprintIcon(boolean on) {
-        mCache.sharedPreferences.edit().putBoolean("fingerprint_icon", on).apply();
-    }
-
-    public boolean isUseBiometricApi() {
-        return mCache.sharedPreferences.getBoolean("biometric_api", false);
-    }
-
-    public void setUseBiometricApi(boolean on) {
-        mCache.sharedPreferences.edit().putBoolean("biometric_api", on).apply();
-    }
-
-    public boolean isVolumeDownMonitorEnabled() {
-        return mCache.sharedPreferences.getBoolean("volume_down_monitor_enabled", true);
-    }
-
-    public void setVolumeDownMonitorEnabled(boolean on) {
-        mCache.sharedPreferences.edit().putBoolean("volume_down_monitor_enabled", on).apply();
-    }
-
-    public void setSkipVersion(String version) {
-        mCache.sharedPreferences.edit().putString("skip_version", version).apply();
-        mCache.mainAppSharedPreferences.edit().putString("skip_version", version).apply();
-    }
-
-    @Nullable
-    public String getSkipVersion() {
-        String skipVersion = mCache.mainAppSharedPreferences.getString("skip_version", null);
-        if (TextUtils.isEmpty(skipVersion)) {
-            skipVersion = mCache.sharedPreferences.getString("skip_version", null);
-        }
-        return skipVersion;
-    }
-
-    public void setLicenseAgree(boolean agree) {
-        mCache.sharedPreferences.edit().putBoolean("license_agree", agree).apply();
-        mCache.mainAppSharedPreferences.edit().putBoolean("license_agree", agree).apply();
-    }
-
-    public boolean getLicenseAgree() {
-        boolean agree = mCache.mainAppSharedPreferences.getBoolean("license_agree", false);
-        if (!agree) {
-            agree = mCache.sharedPreferences.getBoolean("license_agree", false);
-        }
-        return agree;
-    }
-
-    public void commit() {
-        mCache.sharedPreferences.edit().commit();
-        mCache.mainAppSharedPreferences.edit().commit();
-    }
-
-    private class ObjectCache {
-        SharedPreferences sharedPreferences;
-        SharedPreferences mainAppSharedPreferences;
-        int passwordEncKey;
-
-        public ObjectCache(SharedPreferences sharedPreferences, SharedPreferences mainAppSharedPreferences,int passwordEncKey) {
-            this.sharedPreferences = sharedPreferences;
-            this.mainAppSharedPreferences = mainAppSharedPreferences;
-            this.passwordEncKey = passwordEncKey;
-        }
-    }
+    public boolean isShowFingerprintIcon() { return option("fingerprint_icon", false); }
+    public void setShowFingerprintIcon(boolean value) { set("fingerprint_icon", value); }
+    public boolean isUnderDisplayFingerprint() { return !isShowFingerprintIcon(); }
+    public void setUnderDisplayFingerprint(boolean value) { setShowFingerprintIcon(!value); }
+    public boolean isUseBiometricApi() { return option("biometric_api", false); }
+    public void setUseBiometricApi(boolean value) { set("biometric_api", value); }
+    public boolean isVolumeDownMonitorEnabled() { return option("volume_down_monitor_enabled", true); }
+    public void setVolumeDownMonitorEnabled(boolean value) { set("volume_down_monitor_enabled", value); }
+    private String skipKey() { return "skip_" + PluginApp.getCurrentType().name().toLowerCase(Locale.ROOT); }
+    public void setSkipVersion(String value) { set(skipKey(), value); }
+    public String getSkipVersion() { try { return read().getJSONObject("globals").optString(skipKey(), ""); } catch (Exception ignored) { return ""; } }
+    public void setLicenseAgree(boolean value) { set("license_agree", value); }
+    public boolean getLicenseAgree() { return option("license_agree", false); }
+    public boolean isAutoUpdate() { return option("auto_update", true); }
+    public void commit() {}
 }

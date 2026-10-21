@@ -2,12 +2,14 @@ apply plugin: 'com.android.application'
 
 android {
 
+    sourceSets.main.assets.srcDir(rootProject.file("module/webui/dist"))
+
     defaultConfig {
         applicationId "com.surcumference.fingerprintpay"
-        minSdk 14
+        minSdk 23
         targetSdk 37
-        versionCode 37
-        versionName "6.1.0"
+        versionCode 55
+        versionName "7.0.0"
         buildConfigField "String", "APP_PRODUCT_NAME", "\"FingerprintPay\""
     }
 
@@ -23,10 +25,6 @@ android {
         flatDir{
             dirs 'libs'
         }
-    }
-
-    packaging {
-        resources.excludes += '**/publicsuffixes.gz'
     }
 
     buildFeatures {
@@ -53,6 +51,14 @@ android {
         buildTypes.release.signingConfig signingConfigs.release
     }
 }
+tasks.named('preBuild') {
+    dependsOn(rootProject.tasks.named('verifyWebUi'))
+}
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    variant.outputs.each { output ->
+        output.outputFileName.set("xposed.${android.defaultConfig.applicationId}.wechatfp.${android.defaultConfig.versionName}.${variant.buildType}.apk")
+    }
+}
 apply from: rootProject.file('gradle/android-toolchain.gradle')
 apply from: rootProject.file('gradle/legacy-fingerprint-stubs.gradle')
 
@@ -63,18 +69,18 @@ project.ext.appInfo = [
     WeChat:     "com.tencent.mm",
     UnionPay:   "com.unionpay",
 ]
-project.ext.moduleFrameworks = ['riru', 'zygisk']
+project.ext.moduleFrameworks = ['zygisk']
 
+apply from: rootProject.file('gradle/app-payload.gradle')
 apply from: 'debug.gradle'
 apply from: 'update-json.gradle'
 dependencies {
     implementation project(":3rdparty:FingerprintIdentify:FingerprintIdentifyLib")
-    implementation 'com.google.code.gson:gson:2.8.6'
-    implementation 'com.squareup.okhttp3:okhttp:3.12.8'
+    implementation 'com.google.code.gson:gson:2.14.0'
+    implementation 'com.squareup.okhttp3:okhttp:5.5.0'
     implementation 'com.umeng.analytics:analytics:6.1.2'
-    implementation 'com.crossbowffs.remotepreferences:remotepreferences:0.5'
-    implementation 'com.github.AndroidDeveloperLB:MaterialPreferenceLibrary:10'
-    implementation 'com.lzy.net:okgo:3.0.4'
-    implementation 'com.github.getActivity:Toaster:12.6'
-    compileOnly 'de.robv.android.xposed:api:53'
+    implementation 'androidx.appcompat:appcompat:1.8.0'
+    implementation 'com.github.getActivity:EasyHttp:13.8'
+    implementation 'com.github.getActivity:Toaster:15.0'
+    compileOnly 'de.robv.android.xposed:api:82'
 }

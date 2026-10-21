@@ -9,7 +9,7 @@ android {
 
     namespace = 'com.wei.android.lib.fingerprintidentify'
     defaultConfig {
-        minSdk = 14
+        minSdk = 23
     }
     lint {
         abortOnError = false
@@ -18,6 +18,6 @@ android {
 
 dependencies {
     api fileTree(dir: 'libs', include: ['*.jar'])
-    implementation 'androidx.appcompat:appcompat:1.0.2'
+    implementation 'androidx.appcompat:appcompat:1.8.0'
     implementation 'androidx.biometric:biometric:1.1.0'
 }

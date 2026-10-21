@@ -1,1 +1,0 @@
-ext.moduleResourcePath = rootProject.file('../../app/build/outputs/dex/release/classes.dex').absolutePath

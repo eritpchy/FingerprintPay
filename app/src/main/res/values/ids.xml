@@ -1,119 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <item name="template" type="id"/>
-    <item name="settings_title_help_wechat" type="id"/>
-    <item name="settings_title_help_alipay" type="id"/>
-    <item name="settings_title_help_taobao" type="id"/>
-    <item name="settings_title_help_qq" type="id"/>
-    <item name="settings_title_help_unionpay" type="id"/>
-    <item name="settings_title_qq_group" type="id"/>
-    <item name="settings_title_help_faq" type="id"/>
-    <item name="settings_title_license" type="id"/>
-    <item name="settings_title_checkupdate" type="id"/>
-    <item name="settings_title_advance" type="id"/>
-    <item name="settings_title_webside" type="id"/>
-    <item name="settings_title_version" type="id"/>
-    <item name="settings_sub_title_help_wechat" type="id"/>
-    <item name="settings_sub_title_help_alipay" type="id"/>
-    <item name="settings_sub_title_help_taobao" type="id"/>
-    <item name="settings_sub_title_help_qq" type="id"/>
-    <item name="settings_sub_title_help_unionpay" type="id"/>
-    <item name="settings_sub_title_qq_group" type="id"/>
-    <item name="settings_sub_title_help_faq" type="id"/>
-    <item name="settings_sub_title_license" type="id"/>
-    <item name="settings_sub_title_checkupdate" type="id"/>
-    <item name="settings_sub_title_webside" type="id"/>
     <item name="found_new_version" type="id"/>
     <item name="skip_this_version" type="id"/>
     <item name="cancel" type="id"/>
     <item name="goto_update_page" type="id"/>
-    <item name="goto_update_page_mirror" type="id"/>
     <item name="update_now" type="id"/>
-    <item name="update_success_note" type="id"/>
+    <item name="root_manager_missing" type="id"/>
+    <item name="update_failed" type="id"/>
+    <item name="module_update_note" type="id"/>
+    <item name="open_root_manager" type="id"/>
     <item name="downloading" type="id"/>
     <item name="download_title_failed" type="id" />
-    <item name="download_complete_file_size_miss_match" type="id" />
     <item name="ok" type="id"/>
     <item name="settings_title_taobao" type="id"/>
     <item name="settings_title_alipay" type="id"/>
     <item name="settings_title_wechat" type="id"/>
     <item name="settings_title_qq" type="id"/>
     <item name="settings_title_unionpay" type="id"/>
-    <item name="enter_password" type="id"/>
-    <item name="settings_title_switch" type="id"/>
-    <item name="settings_title_password" type="id"/>
-    <item name="settings_title_no_fingerprint_icon" type="id"/>
-    <item name="settings_title_donate" type="id"/>
-    <item name="settings_title_use_biometric_api" type="id"/>
-    <item name="settings_title_volume_down_fingerprint_temporary_disable" type="id"/>
-    <item name="settings_title_start_logcat" type="id"/>
-    <item name="settings_title_stop_logcat" type="id"/>
-    <item name="settings_sub_title_switch_alipay" type="id"/>
-    <item name="settings_sub_title_switch_wechat" type="id"/>
-    <item name="settings_sub_title_switch_qq" type="id"/>
-    <item name="settings_sub_title_switch_unionpay" type="id"/>
-    <item name="settings_sub_title_password_alipay" type="id"/>
-    <item name="settings_sub_title_password_wechat" type="id"/>
-    <item name="settings_sub_title_no_fingerprint_icon" type="id"/>
-    <item name="settings_sub_title_password_qq" type="id"/>
-    <item name="settings_sub_title_password_unionpay" type="id"/>
-    <item name="settings_sub_title_donate" type="id"/>
-    <item name="settings_sub_title_advance" type="id"/>
-    <item name="settings_sub_title_update_modules_same_time" type="id"/>
-    <item name="settings_sub_title_use_biometric_api" type="id"/>
-    <item name="settings_sub_title_volume_down_fingerprint_temporary_disable" type="id"/>
-    <item name="settings_sub_title_start_logcat" type="id"/>
-    <item name="settings_sub_title_stop_logcat" type="id"/>
     <item name="fingerprint_verification" type="id"/>
-    <item name="wechat_general" type="id"/>
-    <item name="app_settings_name" type="id"/>
-    <item name="wechat_payview_password_title" type="id"/>
-    <item name="wechat_payview_fingerprint_title" type="id"/>
-    <item name="wechat_payview_password_switch_text" type="id"/>
-    <item name="wechat_payview_fingerprint_switch_text" type="id"/>
-    <item name="qq_payview_password_title" type="id"/>
     <item name="qq_payview_fingerprint_title" type="id"/>
     <item name="qq_payview_password_switch_text" type="id"/>
     <item name="qq_payview_fingerprint_switch_text" type="id"/>
     <item name="unionpay_payview_shown" type="id"/>
     <item name="unionpay_payment_method_listener" type="id"/>
     <item name="alipay_payment_method_item_click_listener" type="id"/>
-    <item name="disagree" type="id"/>
-    <item name="agree" type="id"/>
     <item name="update_time" type="id"/>
-    <item name="update_no_root" type="id"/>
-    <item name="update_at_least_select_one" type="id"/>
-    <item name="update_file_corrupted" type="id"/>
-    <item name="update_file_missing" type="id"/>
-    <item name="update_installation_failed" type="id"/>
 
-    <item name="toast_give_me_star" type="id"/>
     <item name="toast_checking_update" type="id"/>
     <item name="toast_no_update" type="id"/>
     <item name="toast_check_update_fail_net_err" type="id"/>
     <item name="toast_fingerprint_not_match" type="id"/>
     <item name="toast_fingerprint_retry_ended" type="id"/>
+    <item name="toast_fingerprint_failed" type="id"/>
     <item name="toast_fingerprint_unlock_reboot" type="id"/>
     <item name="toast_fingerprint_not_enable" type="id"/>
-    <item name="toast_fingerprint_password_enc_success" type="id"/>
-    <item name="toast_fingerprint_password_dec_failed" type="id"/>
-    <item name="toast_fingerprint_operation_cancel" type="id"/>
     <item name="toast_fingerprint_temporary_disabled" type="id"/>
-    <item name="toast_password_not_set_alipay" type="id"/>
-    <item name="toast_password_not_set_wechat" type="id"/>
-    <item name="toast_password_not_set_qq" type="id"/>
-    <item name="toast_password_not_set_taobao" type="id"/>
-    <item name="toast_password_not_set_generic" type="id"/>
-    <item name="toast_password_not_set_switch_on_failed" type="id"/>
     <item name="toast_password_auto_enter_fail" type="id"/>
-    <item name="toast_goto_donate_page_fail_alipay" type="id"/>
-    <item name="toast_goto_donate_page_fail_wechat" type="id"/>
-    <item name="toast_goto_donate_page_fail_qq" type="id"/>
     <item name="toast_need_qq_7_2_5" type="id"/>
-    <item name="toast_start_logging" type="id"/>
-    <item name="toast_stop_logging" type="id"/>
-    <item name="toast_update_available" type="id"/>
     <item name="message_version_not_supported" type="id"/>
 
-    <item name="tag_password_layout_listener" type="id"/>
+    <item name="payment_password_notice" type="id"/>
 </resources>

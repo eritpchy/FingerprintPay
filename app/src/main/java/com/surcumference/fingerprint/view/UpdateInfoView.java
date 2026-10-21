@@ -1,6 +1,7 @@
 package com.surcumference.fingerprint.view;
 
 import android.content.Context;
+import android.content.res.Configuration;
 import android.text.Html;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
@@ -8,14 +9,12 @@ import android.text.method.LinkMovementMethod;
 import android.text.style.ClickableSpan;
 import android.text.style.URLSpan;
 import android.text.util.Linkify;
-import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 
 import com.surcumference.fingerprint.Lang;
 import com.surcumference.fingerprint.R;
@@ -37,23 +36,12 @@ public class UpdateInfoView extends DialogFrameLayout {
         initView(context);
     }
 
-    public UpdateInfoView(@NonNull Context context, @Nullable AttributeSet attrs) {
-        super(context, attrs);
-        initView(context);
-    }
-
-    public UpdateInfoView(@NonNull Context context, @Nullable AttributeSet attrs, int defStyleAttr) {
-        super(context, attrs, defStyleAttr);
-        initView(context);
-    }
-
     private void initView(Context context) {
 
         TextView contentTextView = new TextView(context);
         contentTextView.setClickable(true);
         contentTextView.setAutoLinkMask(Linkify.WEB_URLS);
         contentTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_SMALL);
-        contentTextView.setTextColor(StyleUtils.TEXT_COLOR_DEFAULT);
 
         int defHPadding = DpUtils.dip2px(context, 20);
         contentTextView.setPadding(defHPadding, 0, defHPadding, 0);
@@ -65,6 +53,18 @@ public class UpdateInfoView extends DialogFrameLayout {
         withPositiveButtonText(Lang.getString(R.id.update_now));
 
         mContentTextView = contentTextView;
+        applyTheme();
+    }
+
+    private void applyTheme() {
+        mContentTextView.setTextColor(StyleUtils.textColor(getContext()));
+        mContentTextView.setLinkTextColor(StyleUtils.accentColor(getContext()));
+        mContentTextView.setHighlightColor(StyleUtils.pressedColor(getContext()));
+    }
+
+    @Override protected void onConfigurationChanged(Configuration configuration) {
+        super.onConfigurationChanged(configuration);
+        applyTheme();
     }
 
     public void setContent(String text) {
