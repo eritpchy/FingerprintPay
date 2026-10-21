@@ -6,6 +6,16 @@ on:
       - '**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_RELEASE_MINIFYENABLED: 'true'
+
 jobs:
   build:
 
@@ -22,16 +32,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libarchive-zip-perl
-      - name: Decode proguard rules
-        uses: mobiledevops/secret-to-file-action@v1
-        with:
-          base64-encoded-secret: ${{ secrets.PROGUARD_RULES }}
-          filename: "app/proguard-rules.pro"
-      - name: Decode keystore
-        uses: mobiledevops/secret-to-file-action@v1
-        with:
-          base64-encoded-secret: ${{ secrets.SIGNING_STORE_BASE64 }}
-          filename: "app/keystore.jks"
+      - name: Decode release keystore
+        env:
+          SIGNING_STORE_BASE64: ${{ secrets.SIGNING_STORE_BASE64 }}
+        run: |
+          test -n "$SIGNING_STORE_BASE64" || { echo "Release signing keystore is missing"; exit 1; }
+          printf '%s' "$SIGNING_STORE_BASE64" | base64 --decode > app/keystore.jks
+          chmod 600 app/keystore.jks
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
@@ -44,31 +51,54 @@ jobs:
           BUILD_TOOLS=$(sed -n 's/^buildToolsVersion=//p' gradle/android-toolchain.properties)
           NDK_VERSION=$(sed -n 's/^ndkVersion=//p' gradle/android-toolchain.properties)
           sdkmanager "platforms;android-36" "platforms;android-$SDK_PLATFORM.$SDK_MINOR" "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION" "cmake;3.22.1"
+      - uses: actions/cache@v4
+        with:
+          path: module/build/sodium
+          key: sodium-${{ runner.os }}-${{ hashFiles('gradle/android-toolchain.properties', 'module/build-sodium.sh', 'module/vendor/libsodium-1.0.20.tar.gz') }}
       - name: Build Zygisk five-app module
         run: cd ./module && bash ./make.sh
         env:
-          BUILD_RELEASE_MINIFYENABLED: ${{ vars.BUILD_RELEASE_MINIFYENABLED }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-      - name: Build with Gradle
-        run:  ./gradlew clean && ./gradlew ":app:assembleRelease"
-        env:
-          BUILD_RELEASE_MINIFYENABLED: ${{ vars.BUILD_RELEASE_MINIFYENABLED }}
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+      - name: Verify release artifacts
+        run: |
+          python3 - <<'PYVERIFY'
+          import hashlib, json, os, pathlib, re, subprocess, zipfile
+          root = pathlib.Path('.')
+          metadata = json.loads((root / 'app/build/outputs/apk/release/output-metadata.json').read_text())['elements'][0]
+          apk = root / 'app/build/outputs/apk/release' / metadata['outputFile']
+          toolchain = dict(line.split('=', 1) for line in (root / 'gradle/android-toolchain.properties').read_text().splitlines() if '=' in line)
+          signer = pathlib.Path(os.environ['ANDROID_HOME']) / 'build-tools' / toolchain['buildToolsVersion'] / 'apksigner'
+          subprocess.run([str(signer), 'verify', str(apk)], check=True)
+          module = root / 'module/build/release' / ('zygisk-module-xfingerprint-pay-all-v' + metadata['versionName'] + '-release.zip')
+          dist = root / 'module/webui/dist'
+          manifest = json.loads((dist / 'manifest.json').read_text())
+          with zipfile.ZipFile(apk) as app, zipfile.ZipFile(module) as archive:
+              for name in [*manifest['files'], 'manifest.json']:
+                  assert app.read('assets/' + name) == archive.read('webroot/' + name) == (dist / name).read_bytes(), name
+              for abi in ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']:
+                  assert archive.read('lib/' + abi + '/libzygisk-module-xfingerprint-pay-all.so')
+                  assert archive.read('bin/' + abi + '/fpconfig')
+              assert 'debug-file-dex' not in archive.namelist()
+          mapping = (root / 'app/build/outputs/mapping/release/mapping.txt').read_text()
+          assert 'com.surcumference.fingerprint.storage.XposedActivation -> com.surcumference.fingerprint.storage.XposedActivation:' in mapping
+          assert re.search(r'\bframeworkVersion\(\)(?::[0-9:]+)? -> frameworkVersion$', mapping, re.MULTILINE)
+          artifacts = [apk, module]
+          (root / 'SHA256SUMS').write_text(''.join(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n' for path in artifacts))
+          print('Verified signed release inputs, four ABIs, R8 and matching WebUI assets')
+          PYVERIFY
       - name: Upload Apk
         uses: actions/upload-artifact@v4
         with:
           name: xposed.${{ steps.current-time.outputs.formattedTime }}
+          if-no-files-found: error
           path: app/build/outputs/apk/release/*.apk
       - name: Upload Mapping
         uses: actions/upload-artifact@v4
         with:
           name: mapping.${{ steps.current-time.outputs.formattedTime }}
+          if-no-files-found: error
           path: app/build/outputs/mapping/release/mapping.txt
       - name: Upload WebUI dist
         uses: actions/upload-artifact@v4
@@ -82,24 +112,32 @@ jobs:
           path: |
             module/build/release/zygisk-module-xfingerprint-pay-all-*.zip
 
-      - name: Assign release version from version.properties to Env variable
-        run: |
-          cat ./app/build.gradle| grep versionName | sed -E 's/.+"(.+)".*/release_version=\1/g' >> $GITHUB_ENV
-      - name: Echo release version from  Env variable
-        run: |
-          echo "${{ env.release_version }}"
-      - name: Delete drafts
-        run: gh release list --json tagName,isDraft -q '.[] | select(.isDraft) | .tagName' | xargs -I {} gh release delete {} --yes 2>/dev/null || true
+      - name: Set release metadata
+        id: release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          VERSION=$(sed -n 's/^[[:space:]]*versionName "\([^"]*\)".*/\1/p' app/build.gradle)
+          test -n "$VERSION"
+          if [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ]; then
+            echo "tag=$VERSION-ci" >> "$GITHUB_OUTPUT"
+            echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$VERSION-ci-$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "name=$VERSION CI #$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
       - name: Release draft
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          name: "${{ env.release_version }}"
-          tag_name: "${{ env.release_version }}-ci"
+          prerelease: ${{ github.ref_name != github.event.repository.default_branch }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.release.outputs.name }}
+          tag_name: ${{ steps.release.outputs.tag }}
+          fail_on_unmatched_files: true
           files: |
             module/build/release/zygisk-module-xfingerprint-pay-all-*.zip
             app/build/outputs/apk/release/*.apk
             app/build/outputs/mapping/release/mapping.txt
-          body: "[Github Action](https://github.com/${{github.repository}}/actions/runs/${{github.run_id}})"
+            SHA256SUMS
+          body: "[GitHub Actions](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) - ${{ github.sha }}"

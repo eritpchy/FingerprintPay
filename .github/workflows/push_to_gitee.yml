@@ -1,6 +1,7 @@
 name: 'Push to Gitee'
 on:
   push:
+    branches: [main]
 
 jobs:
   repo-sync:
