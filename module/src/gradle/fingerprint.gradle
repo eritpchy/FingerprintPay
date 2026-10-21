@@ -1,7 +1,1 @@
-afterEvaluate {
-    android.libraryVariants.forEach { variant ->
-        def magiskDir = file("$rootDir/template/magisk_module")
-        variant.assembleProvider.get().doLast {
-        }
-    }
-}
+ext.moduleResourcePath = rootProject.file('../../app/build/outputs/dex/release/classes.dex').absolutePath

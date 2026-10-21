@@ -119,10 +119,9 @@ public class HomeActivity extends AppCompatActivity implements AdapterView.OnIte
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        switch (item.getItemId()) {
-            case R.id.item_settings:
-                SettingsActivity.open(this);
-                return true;
+        if (item.getItemId() == R.id.item_settings) {
+            SettingsActivity.open(this);
+            return true;
         }
         return super.onOptionsItemSelected(item);
     }

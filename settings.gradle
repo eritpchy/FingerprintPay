@@ -4,3 +4,5 @@ include ':app', ':3rdparty:FingerprintIdentify:FingerprintIdentifyLib'
 // dependency (com.novoda:bintray-release) that can no longer be resolved after
 // Bintray shutdown. We only need :FingerprintIdentifyLib, so skip the root build.gradle.
 project(':3rdparty:FingerprintIdentify').buildFileName = 'no_build'
+
+project(':3rdparty:FingerprintIdentify:FingerprintIdentifyLib').buildFileName = '../../../gradle/fingerprint-library.gradle'

@@ -12,6 +12,13 @@ MODULE_LIB_NAME="$(echo "$PLUGIN_TYPE_NAME" | tr '[:upper:]' '[:lower:]')-module
 echo VERSION_NAME: $VERSION_NAME
 echo VERSION_CODE: $VERSION_CODE
 bash ./reset.sh
+cp ../gradlew ../gradlew.bat "$MODULE_TEMPLATE/"
+cp ../gradle/wrapper/* "$MODULE_TEMPLATE/gradle/wrapper/"
+cp ../gradle.properties "$MODULE_TEMPLATE/gradle.properties"
+cp ./src/gradle/template-settings.gradle "$MODULE_TEMPLATE/settings.gradle"
+cp ./src/gradle/template-build.gradle "$MODULE_TEMPLATE/build.gradle"
+cp ./src/gradle/template-module.gradle "$MODULE_TEMPLATE/module/build.gradle"
+bash ../gradlew -p .. :app:exportReleaseDex -Pxposed=false
 cp -rfv ./src/cpp/* $MODULE_TEMPLATE/module/src/main/cpp/
 cp -rfv "$MODULE_GRALDE_FILE" $MODULE_TEMPLATE/module.gradle
 cp -rfv "./src/gradle/fingerprint.gradle" $MODULE_TEMPLATE/
@@ -19,7 +26,7 @@ if [ -f "../local.properties" ]; then cp -rfv ../local.properties $MODULE_TEMPLA
 if [ "$PLUGIN_TYPE_NAME" == "Zygisk" ]; then
   echo "ZYGISK_MODULE_LIB_NAME=\"$MODULE_LIB_NAME\"" > $MODULE_TEMPLATE/template/magisk_module/customize.sh
   cat ./src/zygisk/customize.sh >> $MODULE_TEMPLATE/template/magisk_module/customize.sh
-  rm -f $MODULE_TEMPLATE/template/magisk_module/riru.sh
+  python3 -c 'import pathlib,sys; pathlib.Path(sys.argv[1]).unlink(missing_ok=True)' "$MODULE_TEMPLATE/template/magisk_module/riru.sh"
 else
   cat ./src/magisk/customize.sh >> $MODULE_TEMPLATE/template/magisk_module/customize.sh
 fi
@@ -30,6 +37,7 @@ perl -0777 -i -pe  's/(specializeAppProcessPre[\W\w]+?{[\W\w]+?)}/$1    fingerpr
 perl -0777 -i -pe  's/(specializeAppProcessPost[\W\w]+?{[\W\w]+?)}/$1    fingerprintPost(env, MAGISK_MODULE_TYPE_RIRU);\n}/'  $MODULE_TEMPLATE/module/src/main/cpp/main.cpp
 perl -0777 -i -pe  's/^/#include "fingerprint.h"\n/'  $MODULE_TEMPLATE/module/src/main/cpp/main.cpp
 perl -i -pe  's/(main\.cpp)/$1 fingerprint.cpp zygisk_main.cpp resource_extractor.cpp crc32.cpp/g'  $MODULE_TEMPLATE/module/src/main/cpp/CMakeLists.txt
+perl -0777 -i -pe 's/find_program\(CRC32_COMMAND crc32\)[\W\w]+?add_definitions\(-DRESOURCE_CRC32=0x\$\{RESOURCE_CRC32\}\)/include("\${CMAKE_CURRENT_SOURCE_DIR}\/resource_crc32.cmake")/' "$MODULE_TEMPLATE/module/src/main/cpp/CMakeLists.txt"
 $MODULE_TEMPLATE/gradlew -p $MODULE_TEMPLATE clean \
   -PVERSION_NAME=$VERSION_NAME \
   -PVERSION_CODE=$VERSION_CODE \

@@ -1,0 +1,11 @@
+def toolchain = new Properties()
+rootProject.file(rootProject.name == 'MagiskModuleTemplate' ? '../../gradle/android-toolchain.properties' : 'gradle/android-toolchain.properties').withInputStream { toolchain.load(it) }
+android {
+    compileSdk {
+        version = release(toolchain.compileSdk as int) {
+            minorApiLevel = toolchain.compileSdkMinor as int
+        }
+    }
+    buildToolsVersion = toolchain.buildToolsVersion
+    ndkVersion = toolchain.ndkVersion
+}

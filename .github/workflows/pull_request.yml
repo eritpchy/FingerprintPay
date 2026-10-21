@@ -19,12 +19,19 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: recursive
-      - name: set up JDK 11
-        uses: actions/setup-java@v2
+      - name: set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          java-version: '11'
-          distribution: 'adopt'
+          java-version: '17'
+          distribution: 'temurin'
           cache: gradle
+      - name: Install Android toolchain
+        run: |
+          SDK_PLATFORM=$(sed -n 's/^compileSdk=//p' gradle/android-toolchain.properties)
+          SDK_MINOR=$(sed -n 's/^compileSdkMinor=//p' gradle/android-toolchain.properties)
+          BUILD_TOOLS=$(sed -n 's/^buildToolsVersion=//p' gradle/android-toolchain.properties)
+          NDK_VERSION=$(sed -n 's/^ndkVersion=//p' gradle/android-toolchain.properties)
+          sdkmanager "platforms;android-36" "platforms;android-$SDK_PLATFORM.$SDK_MINOR" "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION" "cmake;3.22.1"
       - name: Build Riru modules
         run: cd ./module && bash ./make.sh
       - name: Grant execute permission for gradlew

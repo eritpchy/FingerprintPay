@@ -1,0 +1,17 @@
+plugins {
+    id 'idea'
+}
+
+idea.module {
+    excludeDirs += file('out')
+    resourceDirs += file('template')
+    resourceDirs += file('scripts')
+}
+
+ext {
+    outDir = file("$rootDir/out")
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.layout.buildDirectory, outDir
+}

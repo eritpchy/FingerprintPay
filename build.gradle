@@ -7,10 +7,13 @@ buildscript {
         maven { url 'https://maven.google.com' }
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.1.2'
+        def toolchain = new Properties()
+        rootProject.file('gradle/android-toolchain.properties').withInputStream { toolchain.load(it) }
+        classpath "com.android.tools.build:gradle:${toolchain.agpVersion}"
     }
 }
 
+ext.androidApkArtifact = com.android.build.api.artifact.SingleArtifact.APK.INSTANCE
 
 allprojects {
     repositories {
@@ -35,6 +38,6 @@ allprojects {
     }
 }
 
-task clean(type: Delete) {
+tasks.register('clean', Delete) {
     delete rootProject.buildDir
 }

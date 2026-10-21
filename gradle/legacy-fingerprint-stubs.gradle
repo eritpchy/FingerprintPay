@@ -1,0 +1,15 @@
+def legacySdk = androidComponents.sdkComponents.sdkDirectory.map {
+    it.file('platforms/android-36/android.jar')
+}
+def legacyStubs = tasks.register('legacyFingerprintStubs', Jar) {
+    from({ zipTree(legacySdk.get().asFile) }) {
+        include 'android/hardware/fingerprint/**'
+    }
+    archiveFileName = 'legacy-fingerprint-api.jar'
+    destinationDirectory = layout.buildDirectory.dir('api-stubs')
+}
+
+dependencies {
+    // R8 needs the legacy platform declarations; they must never be packaged.
+    compileOnly files(legacyStubs)
+}

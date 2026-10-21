@@ -28,6 +28,5 @@ ext {
     moduleVersion = "v${project.property("VERSION_NAME")}"
     moduleVersionCode = project.property("VERSION_CODE") as int
     moduleUpdateJson = "https://gitee.com/eritpchy/FingerprintPay/raw/main/release/update_${pluginTypeName.toLowerCase()}_taobao.json"
-    moduleResourcePath = fileTree(dir: rootProject.file('../../app/build/intermediates/dex'), include: '**/classes.dex').files.sort { it.lastModified() }.last().absolutePath
 }
 apply from: "$rootDir/fingerprint.gradle"

@@ -1,0 +1,132 @@
+import org.apache.tools.ant.filters.FixCrLfFilter
+import org.apache.tools.ant.filters.ReplaceTokens
+
+import java.security.MessageDigest
+
+plugins {
+    id 'com.android.library'
+}
+
+apply from: rootProject.file('module.gradle')
+apply from: rootProject.file('../../gradle/android-toolchain.gradle')
+
+android {
+    namespace = 'com.example.app'
+    defaultConfig {
+        minSdk = 23
+        externalNativeBuild {
+            cmake {
+                arguments "-DMODULE_NAME:STRING=$moduleLibraryName",
+                        "-DRIRU_MODULE_API_VERSION=$moduleRiruApiVersion",
+                        "-DRIRU_MODULE_VERSION=$moduleVersionCode",
+                        "-DRIRU_MODULE_VERSION_NAME:STRING=$moduleVersion",
+                        "-DRIRU_MODULE_MIN_API_VERSION=$moduleMinRiruApiVersion",
+                        "-DRESOURCE_BIN:STRING=$moduleResourcePath"
+            }
+        }
+    }
+    buildFeatures {
+        prefab true
+    }
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+}
+
+dependencies {
+    implementation 'dev.rikka.ndk:riru:26.0.0'
+}
+
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    def variantCapped = variant.name.capitalize()
+    def variantLowered = variant.name.toLowerCase()
+
+    def zipName = "${magiskModuleId.replace('_', '-')}-${moduleVersion}-${variantLowered}.zip"
+    def magiskDir = file("$outDir/magisk_module_$variantLowered")
+
+    tasks.register("prepareMagiskFiles${variantCapped}", Sync) {
+        dependsOn("assemble$variantCapped")
+
+        def templatePath = "$rootDir/template/magisk_module"
+
+        into magiskDir
+        from(templatePath) {
+            exclude 'riru.sh', 'module.prop'
+        }
+        from(templatePath) {
+            include 'riru.sh'
+            filter(ReplaceTokens.class, tokens: [
+                    "RIRU_MODULE_LIB_NAME"             : moduleLibraryName,
+                    "RIRU_MODULE_API_VERSION"          : moduleRiruApiVersion.toString(),
+                    "RIRU_MODULE_MIN_API_VERSION"      : moduleMinRiruApiVersion.toString(),
+                    "RIRU_MODULE_MIN_RIRU_VERSION_NAME": moduleMinRiruVersionName,
+            ])
+            filter(FixCrLfFilter.class,
+                    eol: FixCrLfFilter.CrLf.newInstance("lf"))
+        }
+        from(templatePath) {
+            include 'module.prop'
+            expand([
+                    id         : magiskModuleId,
+                    name       : moduleName,
+                    version    : moduleVersion,
+                    versionCode: moduleVersionCode.toString(),
+                    author     : moduleAuthor,
+                    description: moduleDescription,
+                    updateJson : moduleUpdateJson,
+            ])
+            filter(FixCrLfFilter.class,
+                    eol: FixCrLfFilter.CrLf.newInstance("lf"))
+        }
+        from("$buildDir/intermediates/stripped_native_libs/$variantLowered/strip${variantCapped}DebugSymbols/out/lib") {
+            into 'lib'
+        }
+        doLast {
+            fileTree("$magiskDir").visit { f ->
+                if (f.directory) return
+
+                def md = MessageDigest.getInstance("SHA-256")
+                f.file.eachByte 4096, { bytes, size ->
+                    md.update(bytes, 0, size)
+                }
+                file(f.file.path + ".sha256sum").text = md.digest().encodeHex()
+            }
+        }
+    }
+
+    tasks.register("zip${variantCapped}", Zip) {
+        dependsOn("prepareMagiskFiles${variantCapped}")
+        from magiskDir
+        archiveFileName = zipName
+        destinationDirectory = outDir
+    }
+
+    tasks.register("push${variantCapped}", Exec) {
+        dependsOn("zip${variantCapped}")
+        workingDir outDir
+        commandLine androidComponents.sdkComponents.adb.get().asFile, "push", zipName, "/data/local/tmp/"
+    }
+
+    tasks.register("flash${variantCapped}", Exec) {
+        dependsOn("push${variantCapped}")
+        commandLine androidComponents.sdkComponents.adb.get().asFile, "shell", "su", "-c",
+        """"if command -v magisk >/dev/null 2>&1; then
+            magisk --install-module \"/data/local/tmp/${zipName}\"
+        else
+            apd module install \"/data/local/tmp/${zipName}\"
+        fi;
+        rm -fv \"/data/local/tmp/${zipName}\"" """
+    }
+
+    tasks.register("flashAndReboot${variantCapped}", Exec) {
+        dependsOn("flash${variantCapped}")
+        commandLine androidComponents.sdkComponents.adb.get().asFile, "shell", "reboot"
+    }
+
+    tasks.matching { it.name == "assemble${variantCapped}" }.configureEach {
+        finalizedBy("zip${variantCapped}")
+    }
+}

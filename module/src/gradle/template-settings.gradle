@@ -1,0 +1,22 @@
+pluginManagement {
+    def toolchain = new Properties()
+    file('../../gradle/android-toolchain.properties').withInputStream { toolchain.load(it) }
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+    plugins {
+        id 'com.android.library' version toolchain.agpVersion
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = 'MagiskModuleTemplate'
+include ':module'

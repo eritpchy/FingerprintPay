@@ -1,13 +1,13 @@
 ext {
-    adbPath = "${android.getSdkDirectory()}/platform-tools/adb"
+    adbPath = androidComponents.sdkComponents.adb.get().asFile.absolutePath
     xposed = project.findProperty('xposed')?.toBoolean() ?: false
 }
 def adbPushToAppFiles(dexPath, targetName, targetPackage) {
-    exec {
+    providers.exec {
         executable = adbPath
         args = ['push', dexPath, "/data/local/tmp/${targetName}"]
-    }
-    exec {
+    }.result.get()
+    providers.exec {
         executable = adbPath
         args = ["shell", "su", "-c", 
             """"NAME=${targetName} && \
@@ -17,7 +17,7 @@ def adbPushToAppFiles(dexPath, targetName, targetPackage) {
             GID=\\\$(stat -c "%g" /data/data/$targetPackage) && \
             chown \\\$UID:\\\$GID /data/data/$targetPackage/files/\\\$NAME && \
             true" """]
-    }
+    }.result.get()
 }
 
 project.ext.appInfo.each {entry ->
@@ -40,55 +40,57 @@ project.ext.appInfo.each {entry ->
     debugXposedTask.finalizedBy(startTask)
 }
 
-android.applicationVariants.all { variant ->
-    variant.getCompileConfiguration().resolutionStrategy {
-        def buildType = variant.getBuildType()
-        def buildTypeName = buildType.name
-        def buildTypeNameCapitalize = buildTypeName.capitalize()
-        def isMinifyEnabled = buildType.isMinifyEnabled()
-        def minifyTask = tasks.findByName("minifyReleaseWithR8")
-        def dexTask = tasks.findByName(isMinifyEnabled ? "minify${buildTypeNameCapitalize}WithR8" : "mergeDex${buildTypeNameCapitalize}")
-        if (minifyTask) {
-            minifyTask.doFirst {
-                if (xposed) {
-                    return
-                }
-                def aaptRulesFile = file("${buildDir}/intermediates/aapt_proguard_file/release/aapt_rules.txt")
-                if (aaptRulesFile.exists()) {
-                    aaptRulesFile.delete()
-                }
-            }
-        }
-        
-        project.ext.appInfo.each {entry ->
-            def name = entry.key
-            def packageName = entry.value
-            def startTask = tasks.findByName("start$name")
-            def stopTask = tasks.findByName("stop$name")
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    def buildTypeName = variant.buildType
+    def buildTypeNameCapitalize = variant.name.capitalize()
+    def apkDirectory = variant.artifacts.get(rootProject.androidApkArtifact)
+    def exportDex = tasks.register("export${buildTypeNameCapitalize}Dex", Sync) {
+        dependsOn(apkDirectory)
+        from({
+            def apks = fileTree(apkDirectory.get().asFile).matching { include '*.apk' }.files
+            if (apks.size() != 1) throw new GradleException('Expected one APK for native module payload')
+            def dexFiles = zipTree(apks.first()).matching { include 'classes*.dex' }.files
+            if (dexFiles.size() != 1) throw new GradleException('Native modules require a single DEX payload')
+            dexFiles
+        })
+        into layout.buildDirectory.dir("outputs/dex/${variant.name}")
+    }
 
-            project.ext.moduleFrameworks.each { framework ->
-                def moduleTask = tasks.create(name: "${buildTypeName}${name}${framework.capitalize()}", dependsOn: [dexTask]) {
-                    doLast {
-                        def dexPath = fileTree(dir: new File(project.buildDir, "intermediates/dex/${buildTypeName}"), include: '**/classes.dex').files.sort { it.lastModified() }.last().absolutePath
-                        adbPushToAppFiles(dexPath, "${framework}-module-xfingerprint-pay-${name.toLowerCase()}.dex", packageName)
-                    }
+    project.ext.appInfo.each { entry ->
+        def name = entry.key
+        def packageName = entry.value
+        project.ext.moduleFrameworks.each { framework ->
+            def moduleTask = tasks.register("${buildTypeName}${name}${framework.capitalize()}") {
+                dependsOn(exportDex)
+                doLast {
+                    def dexPath = layout.buildDirectory.file("outputs/dex/${variant.name}/classes.dex").get().asFile.absolutePath
+                    adbPushToAppFiles(dexPath, "${framework}-module-xfingerprint-pay-${name.toLowerCase()}.dex", packageName)
                 }
-                moduleTask.finalizedBy(startTask)
             }
+            moduleTask.configure { finalizedBy("start$name") }
         }
+    }
 
-        if (variant.install != null) {
-            variant.install.doLast {
-                println "Running app..."
-                exec {
-                    executable = adbPath
-                    args = ['shell', "monkey -p ${variant.applicationId} -c android.intent.category.LAUNCHER 1"]
-                }
-            }
+    tasks.matching { it.name == "install${buildTypeNameCapitalize}" }.configureEach {
+        doLast {
+            providers.exec {
+                executable = adbPath
+                args = ['shell', "monkey -p ${variant.applicationId.get()} -c android.intent.category.LAUNCHER 1"]
+            }.result.get()
         }
-        variant.outputs.each { output ->
-            def apkName = "xposed.${android.defaultConfig.applicationId}.wechatfp.${android.defaultConfig.versionName}.${variant.buildType.name}.apk"
-            output.outputFileName = apkName
+    }
+    variant.outputs.each { output ->
+        output.outputFileName.set("xposed.${android.defaultConfig.applicationId}.wechatfp.${android.defaultConfig.versionName}.${buildTypeName}.apk")
+    }
+}
+
+tasks.matching { it.name.startsWith('minify') && it.name.endsWith('WithR8') }.configureEach {
+    inputs.property('xposed', xposed)
+    doFirst {
+        if (!xposed) {
+            fileTree(layout.buildDirectory.dir('intermediates/aapt_proguard_file')).matching {
+                include '**/aapt_rules.txt'
+            }.files.each { it.delete() }
         }
     }
 }

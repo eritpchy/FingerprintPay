@@ -2,11 +2,10 @@ apply plugin: 'com.android.application'
 
 android {
 
-    compileSdk 34
     defaultConfig {
         applicationId "com.surcumference.fingerprintpay"
         minSdk 14
-        targetSdk 34
+        targetSdk 37
         versionCode 37
         versionName "6.1.0"
         buildConfigField "String", "APP_PRODUCT_NAME", "\"FingerprintPay\""
@@ -16,7 +15,6 @@ android {
         release {
             minifyEnabled System.getenv("BUILD_RELEASE_MINIFYENABLED")?.toBoolean() ?: false
             shrinkResources System.getenv("BUILD_RELEASE_MINIFYENABLED")?.toBoolean() ?: false
-            zipAlignEnabled true
             proguardFiles 'proguard-rules.pro'
         }
     }
@@ -27,8 +25,12 @@ android {
         }
     }
 
-    packagingOptions {
-        exclude '**/publicsuffixes.gz'
+    packaging {
+        resources.excludes += '**/publicsuffixes.gz'
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
@@ -51,6 +53,9 @@ android {
         buildTypes.release.signingConfig signingConfigs.release
     }
 }
+apply from: rootProject.file('gradle/android-toolchain.gradle')
+apply from: rootProject.file('gradle/legacy-fingerprint-stubs.gradle')
+
 project.ext.appInfo = [
     Alipay:     "com.eg.android.AlipayGphone",
     Taobao:     "com.taobao.taobao",
