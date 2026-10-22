@@ -17,6 +17,11 @@ public final class LocalConfigStore implements ConfigStore {
         preferences = context.getSharedPreferences("unified_config_v1", Context.MODE_PRIVATE);
         snapshot = new XposedConfigSnapshot(context);
     }
+    void syncLauncherIcon() throws Exception {
+        synchronized (LOCK) {
+            LauncherIcon.setVisible(context, document().getJSONObject("globals").getBoolean("show_icon"));
+        }
+    }
     private JSONObject document() throws Exception {
         if (preferences.contains("document")) {
             JSONObject doc = new JSONObject(preferences.getString("document", ""));

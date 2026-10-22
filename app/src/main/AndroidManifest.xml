@@ -52,6 +52,10 @@
                 <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
             </intent-filter>
             <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.INFO" />
+            </intent-filter>
+            <intent-filter>
                 <action android:name="${applicationId}.action.CHECK_UPDATES" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
@@ -70,8 +74,15 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <receiver android:name=".storage.LauncherIcon" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- A default-enabled launcher makes Android synthesize an app-info icon when hidden. -->
         <activity-alias
-            android:enabled="true"
+            android:enabled="false"
             android:name=".Main"
             android:label="@string/app_name"
             android:targetActivity=".activity.HomeActivity"

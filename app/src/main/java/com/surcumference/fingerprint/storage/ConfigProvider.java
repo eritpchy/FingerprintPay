@@ -11,7 +11,11 @@ import org.json.JSONObject;
 public final class ConfigProvider extends ContentProvider {
     private LocalConfigStore store;
     private final PendingDonations donations = new PendingDonations();
-    @Override public boolean onCreate() { store = new LocalConfigStore(getContext()); return true; }
+    @Override public boolean onCreate() {
+        store = new LocalConfigStore(getContext());
+        LauncherIcon.restore(store);
+        return true;
+    }
     @Override public Bundle call(String method, String arg, Bundle extras) {
         if (!"request".equals(method) || extras == null) throw new SecurityException("Invalid request");
         try {
@@ -44,11 +48,7 @@ public final class ConfigProvider extends ContentProvider {
             if (own && "reveal".equals(request.optString("op"))) throw new SecurityException("Password is write-only here");
             JSONObject response = store.request(request);
             if (own && "patch".equals(request.optString("op")) && request.getJSONObject("values").has("show_icon")) {
-                int state = response.getJSONObject("globals").getBoolean("show_icon")
-                        ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-                        : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
-                getContext().getPackageManager().setComponentEnabledSetting(new android.content.ComponentName(getContext(),
-                        "com.surcumference.fingerprint.Main"), state, android.content.pm.PackageManager.DONT_KILL_APP);
+                store.syncLauncherIcon();
             }
             Bundle result = new Bundle(); result.putString("response", response.toString()); return result;
         } catch (Exception error) {
