@@ -6,14 +6,17 @@ DATA=/data/adb/fingerprintpay/update
 fail() { printf 'FP_UPDATE_ERROR:%s\n' "$1" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || fail '请授予 WebUI 宿主 Root 权限'
 property() { sed -n "s/^$1=//p" "$2" | head -n 1; }
+ksu_binary() {
+  for p in /data/adb/ksud /data/adb/ksu/bin/ksud; do
+    if [ -x "$p" ] && "$p" module install --help >/dev/null 2>&1; then printf '%s' "$p"; return; fi
+  done
+  return 1
+}
 manager() {
   provider=$(su -v 2>/dev/null || true)
   case "$provider" in
     *APatch*) [ -x /data/adb/ap/bin/apd ] && { printf APatch; return; };;
-    *KernelSU*)
-      for p in /data/adb/ksud /data/adb/ksu/bin/ksud; do
-        [ ! -x "$p" ] || { printf KernelSU; return; }
-      done;;
+    *KernelSU*|*SukiSU*) ksu_binary >/dev/null && { printf KernelSU; return; };;
     *MAGISK*|*Magisk*) command -v magisk >/dev/null 2>&1 && { printf Magisk; return; };;
   esac
   printf unknown
@@ -29,17 +32,9 @@ case "${1:-}" in
     case "$version" in ''|*[!0-9.]*) fail '无法读取模块版本';; esac
     pending=false
     [ ! -f "/data/adb/modules_update/$ID/module.prop" ] || pending=true
-    printf '{"version":"%s","manager":"%s","pending":%s}\n' "$version" "$(manager)" "$pending"
-    ;;
-  check)
-    umask 077
-    mkdir -p "$DATA"
-    meta=$(mktemp "$DATA/release.XXXXXX")
-    trap 'unlink "$meta"' EXIT
-    for url in https://api.github.com/repos/eritpchy/FingerprintPay/releases/latest https://accelerate.xdow.net/api/repos/eritpchy/FingerprintPay/releases/latest; do
-      if fetch "$url" "$meta" 25 1048576; then cat "$meta"; exit 0; fi
-    done
-    fail '检查更新失败，请检查网络后重试，或在 Root 管理器中更新模块'
+    download=false
+    command -v curl >/dev/null 2>&1 && command -v sha256sum >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && download=true
+    printf '{"version":"%s","manager":"%s","pending":%s,"canDownload":%s}\n' "$version" "$(manager)" "$pending" "$download"
     ;;
   install)
     [ "$#" = 4 ] || fail '更新参数不完整'
@@ -78,8 +73,7 @@ case "${1:-}" in
     case "$target" in
       APatch) /data/adb/ap/bin/apd module install "$archive";;
       KernelSU)
-        installer=/data/adb/ksud
-        [ -x "$installer" ] || installer=/data/adb/ksu/bin/ksud
+        installer=$(ksu_binary)
         "$installer" module install "$archive";;
       Magisk) magisk --install-module "$archive";;
     esac
