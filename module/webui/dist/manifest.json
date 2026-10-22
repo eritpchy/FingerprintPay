@@ -53,8 +53,8 @@
       "bytes": 1342
     },
     "index.html": {
-      "sourceSha256": "d2039047207b7572be6c50a3e4594b5d0f54ea870e85e4b03132932e4988b04c",
-      "sha256": "cc180c5a74e71f4d119f57690fea43f15bbc9c7589ae93bf79209320fb78d7ee",
+      "sourceSha256": "973e325360774b0470b9ef36b85cd52e85088583e7ec78d3d3d6740f73a0dec7",
+      "sha256": "ad998a6c5df3d89c4f3c29760af56dd45894caeef294cb22920a72adebd80ad6",
       "bytes": 15408
     },
     "sodium.js": {

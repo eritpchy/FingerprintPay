@@ -2,24 +2,45 @@ name: Release Published
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to verify
+        required: true
+        type: string
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  verify:
     if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     steps:
-      - name: Publish release
-        run: |
-          RCLONE_CONFIG_WEBDAV_PASS=$(docker run --rm rclone/rclone obscure $WEBDAV_PASSWORD)
-          docker run --rm \
-            -e RCLONE_CONFIG_WEBDAV_TYPE=webdav \
-            -e RCLONE_CONFIG_WEBDAV_USER=$RCLONE_CONFIG_WEBDAV_USER \
-            -e RCLONE_CONFIG_WEBDAV_URL=$RCLONE_CONFIG_WEBDAV_URL \
-            -e RCLONE_CONFIG_WEBDAV_PASS=$RCLONE_CONFIG_WEBDAV_PASS \
-            rclone/rclone moveto webdav:/${{ github.event.release.name }}-dev webdav:/${{ github.event.release.name }}
+      - name: Verify published release assets
         env:
-          RCLONE_CONFIG_WEBDAV_USER: ${{secrets.WEBDAV_USERNAME}}
-          RCLONE_CONFIG_WEBDAV_URL: ${{secrets.WEBDAV_ADDRESS}}
-          WEBDAV_PASSWORD: ${{secrets.WEBDAV_PASSWORD}}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          test -n "$RELEASE_TAG"
+          gh release download "$RELEASE_TAG" --pattern '*.apk' --pattern '*.zip' --pattern SHA256SUMS --dir artifacts
+          cd artifacts
+          python3 - <<'PYVERIFY'
+          import pathlib, re
+          root = pathlib.Path('.')
+          entries = {}
+          for line in (root / 'SHA256SUMS').read_text().splitlines():
+              match = re.fullmatch(r'([0-9a-f]{64})  ([A-Za-z0-9._-]+)', line)
+              assert match, 'Invalid checksum entry'
+              name = match[2]
+              assert name not in entries, 'Duplicate checksum entry'
+              entries[name] = match[1]
+          artifacts = {p.name for p in root.iterdir() if p.suffix in ('.apk', '.zip')}
+          assert artifacts == set(entries), 'Missing or unexpected release artifact'
+          assert sum(n.endswith('.apk') for n in artifacts) == 1, 'Expected one APK'
+          assert sum(n.endswith('.zip') for n in artifacts) == 1, 'Expected one module ZIP'
+          PYVERIFY
+          sha256sum --check SHA256SUMS
