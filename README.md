@@ -42,9 +42,10 @@
 ### Xposed
 
 1. 下载并安装插件: [xposed.com.surcumference.fingerprintpay.release.apk](https://github.com/eritpchy/FingerprintPay/releases/latest)
-2. 在Xposed管理器启用插件
+2. 在Xposed管理器启用插件, 确保作用域正确
 3. 重启手机
-4. 录入支付密码后开始使用。
+4. 找到指纹支付app录入密码开始使用
+5. 录入支付密码后开始使用。
 
 ## 常见问题
 
