@@ -23,6 +23,7 @@ import com.surcumference.fingerprint.Lang;
 import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
 import com.surcumference.fingerprint.plugin.inf.OnFingerprintVerificationOKListener;
+import com.surcumference.fingerprint.plugin.impl.SettingEntry;
 import com.surcumference.fingerprint.util.ActivityViewObserver;
 import com.surcumference.fingerprint.util.ActivityViewObserverHolder;
 import com.surcumference.fingerprint.util.ApplicationUtils;
@@ -110,6 +111,16 @@ public class TaobaoBasePlugin implements IAppPlugin {
         //Xposed not hooked yet!
     }
 
+    /** 淘宝设置页（上游 6.1.0 用过的三类命名）。 */
+    private static boolean isTaobaoSettingsActivity(String name) {
+        if (name == null) {
+            return false;
+        }
+        return name.contains(".NewPaySettingsActivity")
+                || name.contains(".NewTaobaoSettingActivity")
+                || name.contains(".TaobaoSettingActivity");
+    }
+
     @Override
     public void onActivityResumed(Activity activity) {
         try {
@@ -120,6 +131,13 @@ public class TaobaoBasePlugin implements IAppPlugin {
             mCurrentActivity = activity;
             final long activityGeneration = ++mActivityGeneration;
             int versionCode = getVersionCode(activity);
+            // 设置页注入「指纹支付」入口（上游 7.0.0 起移除了应用内入口，这里恢复）
+            if (isTaobaoSettingsActivity(activityClzName)) {
+                Task.onMain(250, () -> SettingEntry.injectAboveAnchor(activity,
+                        "支付设置", "账号与安全", "帐号与安全", "账号管理", "设置"));
+                Task.onMain(1000, () -> SettingEntry.injectAboveAnchor(activity,
+                        "支付设置", "账号与安全", "帐号与安全", "账号管理", "设置"));
+            }
             if (activityClzName.contains(".PayPwdDialogActivity")
                     || activityClzName.contains(".MspContainerActivity")
                     || activityClzName.contains(".FlyBirdWindowActivity")) {

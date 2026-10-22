@@ -26,6 +26,7 @@ import com.surcumference.fingerprint.bean.DigitPasswordKeyPadInfo;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
 import com.surcumference.fingerprint.plugin.inf.IMockCurrentUser;
 import com.surcumference.fingerprint.plugin.inf.OnFingerprintVerificationOKListener;
+import com.surcumference.fingerprint.plugin.impl.SettingEntry;
 import com.surcumference.fingerprint.util.ActivityContext;
 import com.surcumference.fingerprint.util.PaymentController;
 import com.surcumference.fingerprint.util.ActivityViewObserver;
@@ -35,6 +36,7 @@ import com.surcumference.fingerprint.util.BizBiometricIdentify;
 import com.surcumference.fingerprint.util.BlackListUtils;
 import com.surcumference.fingerprint.util.Config;
 import com.surcumference.fingerprint.util.NotifyUtils;
+import com.surcumference.fingerprint.util.StyleUtils;
 import com.surcumference.fingerprint.util.Task;
 import com.surcumference.fingerprint.util.ViewUtils;
 import com.surcumference.fingerprint.util.WeChatVersionControl;
@@ -45,6 +47,7 @@ import com.surcumference.fingerprint.view.AlipayPayView;
 import com.surcumference.fingerprint.view.DialogUtils;
 import com.wei.android.lib.fingerprintidentify.bean.FingerprintIdentifyFailInfo;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.WeakHashMap;
@@ -158,6 +161,10 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         }
         L.d("Activity onResume =", activity);
         final String activityClzName = activity.getClass().getName();
+        // 设置页注入「指纹支付」入口。与支付检测互不影响，故独立于下方分支。
+        if (isWeChatSettingsActivity(activityClzName)) {
+            Task.onMain(100, () -> injectSettingsEntry(activity));
+        }
         if (isLiteAppPaymentActivity(activityClzName)) {
             try {
                 mLiteAppActivity = activity;
@@ -258,6 +265,99 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                     mView2OnAttachStateChangeListenerMap.put(view, listener);
                 }
             });
+        }
+    }
+
+    /** 微信设置页。老版走 ListView 头部，8.0.66+ 的 MainSettingsUI 走右上角菜单。 */
+    private static final String WECHAT_SETTINGS_UI = "com.tencent.mm.plugin.setting.ui.setting.SettingsUI";
+    private static final String WECHAT_MAIN_SETTINGS_UI = "com.tencent.mm.plugin.setting.ui.setting_new.MainSettingsUI";
+
+    private static boolean isWeChatSettingsActivity(String name) {
+        if (name == null) {
+            return false;
+        }
+        return name.contains(WECHAT_SETTINGS_UI)
+                || name.equals(WECHAT_MAIN_SETTINGS_UI)
+                || name.contains("com.tencent.mm.plugin.wallet.pwd.ui.WalletPasswordSettingUI")
+                // 8.0.18+ 设置页整体迁到 VAS 容器，需靠页面内容进一步判别
+                || name.contains("com.tencent.mm.ui.vas.VASCommonActivity")
+                || name.contains("com.tencent.mm.ui.vas.VASCommonFragment");
+    }
+
+    private void injectSettingsEntry(Activity activity) {
+        try {
+            if (!ActivityContext.isAlive(activity)) {
+                return;
+            }
+            final String name = activity.getClass().getName();
+            if (name.equals(WECHAT_MAIN_SETTINGS_UI)) {
+                injectSettingsOptionMenu(activity);
+            } else {
+                injectSettingsHeader(activity, name);
+            }
+        } catch (Exception e) {
+            L.e("WeChat settings entry injection failed", e);
+        }
+    }
+
+    /** 老版设置页：把入口插到设置列表顶部。 */
+    private void injectSettingsHeader(Activity activity, String targetClassName) {
+        final View decorView = activity.getWindow().getDecorView();
+        if (SettingEntry.hasEntry(decorView)) {
+            return;
+        }
+        final boolean vas = targetClassName.contains("com.tencent.mm.ui.vas.VASCommon");
+        if (vas && ViewUtils.findViewByText(decorView, "通用", "一般", "General") == null) {
+            // VAS 容器承载大量页面，只有设置主页才注入
+            return;
+        }
+        final ListView listView = (ListView) ViewUtils.findViewByName(decorView, "android", "list");
+        if (listView == null) {
+            return;
+        }
+        final LinearLayout section = SettingEntry.buildSection(activity, StyleUtils.isDarkMode(activity), 15);
+        section.setLayoutParams(new AbsListView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        try {
+            listView.addHeaderView(section);
+        } catch (IllegalStateException alreadyHasAdapter) {
+            // setAdapter 之后再 addHeaderView 会抛此异常，改为插到列表的父容器中（视觉等效）
+            insertAbove(listView, section);
+        }
+    }
+
+    /** 把视图插到目标视图的前面，用于无法 addHeaderView 的场景。 */
+    private static void insertAbove(View target, View view) {
+        View parent = (View) target.getParent();
+        if (!(parent instanceof ViewGroup)) {
+            return;
+        }
+        final ViewGroup group = (ViewGroup) parent;
+        int index = group.indexOfChild(target);
+        if (index < 0) {
+            return;
+        }
+        group.addView(view, index, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
+    /** 8.0.66+ 设置页：通过 addTextOptionMenu 在右上角菜单加一项。 */
+    private void injectSettingsOptionMenu(Activity activity) {
+        try {
+            Method addTextOptionMenu = activity.getClass().getMethod(
+                    "addTextOptionMenu", int.class, String.class, MenuItem.OnMenuItemClickListener.class);
+            addTextOptionMenu.setAccessible(true);
+            addTextOptionMenu.invoke(activity, R.id.app_settings_name,
+                    Lang.getString(R.id.app_settings_name),
+                    (MenuItem.OnMenuItemClickListener) item -> {
+                        SettingEntry.open(activity);
+                        return true;
+                    });
+            L.d("WeChat settings option menu injected");
+        } catch (Exception e) {
+            // 反射失败时退化为：往设置页顶部插一个条目
+            L.e("addTextOptionMenu unavailable, falling back to header injection", e);
+            injectSettingsHeader(activity, activity.getClass().getName());
         }
     }
 

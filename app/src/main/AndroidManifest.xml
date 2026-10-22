@@ -56,7 +56,14 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-        <activity android:name=".activity.ConfigActivity" android:theme="@style/HomeTheme" android:exported="false"/>
+        <!--
+            exported 必须为 true：设置入口注入代码运行在宿主应用进程（微信/支付宝/淘宝/QQ/云闪付），
+            与指纹支付 APK 属于不同 UID，跨应用启动未导出的 Activity 会被系统以
+            "Permission Denial: not exported from uid" 拒绝。
+            该页面只加载本地 asset 并读写指纹支付自身配置，ConfigProvider 本就已 exported=true，
+            因此这里放开不会引入额外的数据暴露面。
+        -->
+        <activity android:name=".activity.ConfigActivity" android:theme="@style/HomeTheme" android:exported="true"/>
         <provider android:name=".storage.ConfigProvider" android:authorities="com.surcumference.fingerprintpay.config" android:exported="true">
             <grant-uri-permission android:path="/runtime"/>
         </provider>

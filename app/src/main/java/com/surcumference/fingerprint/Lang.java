@@ -50,6 +50,7 @@ public class Lang {
         STRINGS.put(R.id.downloading, tr("下载中", "下載中", "Downloading"));
         STRINGS.put(R.id.download_title_failed, tr("下载出错", "下載出錯", "Download failed"));
         STRINGS.put(R.id.ok, tr("确定", "确定", "OK"));
+        STRINGS.put(R.id.app_settings_name, tr("指纹支付", "指紋支付", "Fingerprint Pay"));
         STRINGS.put(R.id.settings_title_taobao, tr("淘宝", "淘寶", "Taobao"));
         STRINGS.put(R.id.settings_title_alipay, tr("支付宝", "支付寶", "Alipay"));
         STRINGS.put(R.id.settings_title_wechat, tr("微信", "微信", "WeChat"));

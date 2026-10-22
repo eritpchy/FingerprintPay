@@ -24,6 +24,7 @@ import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.bean.DigitPasswordKeyPadInfo;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
 import com.surcumference.fingerprint.plugin.inf.OnFingerprintVerificationOKListener;
+import com.surcumference.fingerprint.plugin.impl.SettingEntry;
 import com.surcumference.fingerprint.util.ActivityContext;
 import com.surcumference.fingerprint.util.DigitKeyResolver;
 import com.surcumference.fingerprint.util.PaymentController;
@@ -109,6 +110,11 @@ public class AlipayBasePlugin implements IAppPlugin {
             if (mCurrentActivity != null && mCurrentActivity != activity) closePayment(mCurrentActivity);
             mCurrentActivity = activity;
             String name = activity.getClass().getName();
+            // 设置页注入「指纹支付」入口（上游 7.0.0 起移除了应用内入口，这里恢复）
+            if (isAlipaySettingsActivity(name)) {
+                Task.onMain(250, () -> SettingEntry.injectAboveAnchor(activity,
+                        "支付密码", "支付密碼", "Payment Password", "生物支付"));
+            }
             if (!(name.contains(".PayPwdDialogActivity") || name.contains(".PayPwdFullActivity")
                     || name.contains(".MspContainerActivity") || name.contains(".FlyBirdWindowActivity")
                     || name.contains("PayPwdHalfActivity"))) return;
@@ -133,6 +139,20 @@ public class AlipayBasePlugin implements IAppPlugin {
             L.e("Alipay payment detection failed", e);
             restorePassword(mPaymentSession.token());
         }
+    }
+
+    /**
+     * 支付宝设置页。
+     * MySettingActivity / UserSettingActivity 为老版入口；
+     * 10.3.80+ 起设置页承载在 FBAppWindowActivity 中，靠页面里的「支付密码」文案判别。
+     */
+    private static boolean isAlipaySettingsActivity(String name) {
+        if (name == null) {
+            return false;
+        }
+        return name.contains(".MySettingActivity")
+                || name.contains(".UserSettingActivity")
+                || name.contains(".FBAppWindowActivity");
     }
 
     public void initFingerPrintLock(final Context context, AlertDialog dialog, String encrypted,

@@ -21,6 +21,7 @@ import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
 import com.surcumference.fingerprint.plugin.inf.IMockCurrentUser;
 import com.surcumference.fingerprint.plugin.inf.OnFingerprintVerificationOKListener;
+import com.surcumference.fingerprint.plugin.impl.SettingEntry;
 import com.surcumference.fingerprint.util.ActivityViewObserver;
 import com.surcumference.fingerprint.util.ActivityViewObserverHolder;
 import com.surcumference.fingerprint.util.ApplicationUtils;
@@ -253,6 +254,9 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
         final String activityClzName = activity.getClass().getName();
         if (activityClzName.contains(".UPActivityReactNative")) {
 
+            // 设置页注入「指纹支付」入口（上游 7.0.0 起移除了应用内入口，这里恢复）
+            Task.onMain(300, () -> SettingEntry.injectAboveAnchor(activity, "通用设置", "支付设置"));
+            Task.onMain(1200, () -> SettingEntry.injectAboveAnchor(activity, "通用设置", "支付设置"));
             watchPayView(activity);
         } else if (activityClzName.contains(".PayWalletActivity")) {
             watchPayView(activity);

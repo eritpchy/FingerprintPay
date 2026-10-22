@@ -31,6 +31,7 @@ import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
 import com.surcumference.fingerprint.plugin.inf.IMockCurrentUser;
 import com.surcumference.fingerprint.plugin.inf.OnFingerprintVerificationOKListener;
+import com.surcumference.fingerprint.plugin.impl.SettingEntry;
 import com.surcumference.fingerprint.util.ApplicationUtils;
 import com.surcumference.fingerprint.util.BizBiometricIdentify;
 import com.surcumference.fingerprint.util.Config;
@@ -96,6 +97,19 @@ public class QQBasePlugin implements IAppPlugin, IMockCurrentUser {
         //Xposed not hooked yet!
     }
 
+    /**
+     * QQ 设置页。MainSettingFragment 是页面里的 Fragment，
+     * 只出现在 Activity.toString() 中，故两者都要看。
+     */
+    private static boolean isQQSettingsActivity(Activity activity) {
+        if (activity == null) {
+            return false;
+        }
+        String name = activity.getClass().getName();
+        return name.contains(".QQSettingSettingActivity")
+                || activity.toString().contains(".MainSettingFragment");
+    }
+
     @Override
     public void onActivityResumed(Activity activity) {
         try {
@@ -105,6 +119,13 @@ public class QQBasePlugin implements IAppPlugin, IMockCurrentUser {
             }
             if (activityClzName.contains(".SplashActivity")) {
                 QQUtils.checkBlackListQQ(activity);
+            }
+            // 设置页注入「指纹支付」入口（上游 7.0.0 起移除了应用内入口，这里恢复）
+            if (isQQSettingsActivity(activity)) {
+                Task.onMain(250, () -> SettingEntry.injectAboveAnchor(activity,
+                        "账号管理", "帐号管理", "账号与安全", "帐号与安全", "通用"));
+                Task.onMain(1000, () -> SettingEntry.injectAboveAnchor(activity,
+                        "账号管理", "帐号管理", "账号与安全", "帐号与安全", "通用"));
             }
             if (activityClzName.contains(".QWalletPluginProxyActivity")
                 || activityClzName.contains(".QWalletToolFragmentActivity")) {
