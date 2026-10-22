@@ -25,7 +25,7 @@
 
 ### Magisk + Zygisk + WebUI
 
-1. 确认 Magisk Manager 应用设置中启用 Zygisk功能
+1. 使用 Magisk 26.0 或更新版本，在设置中启用内置 Zygisk 并重启，无需额外安装 Zygisk Next 或 ReZygisk。使用外置 Zygisk 时请关闭内置 Zygisk，避免同时启用。
 2. 下载插件: [zygisk-module-xfingerprint-pay-all-release.zip](https://github.com/eritpchy/FingerprintPay/releases)
 3. 进入 Magisk Manager 的模块页面安装五合一 ZIP，安装后在 WebUI 调整作用域。
 4. 确认启用模块, 重启手机

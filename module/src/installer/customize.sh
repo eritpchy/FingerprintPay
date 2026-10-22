@@ -8,11 +8,14 @@ for name in module.prop description.original resources.apk payload-manifest.json
 if unzip -l "$ZIPFILE" | grep -q ' debug-file-dex$'; then extract "$ZIPFILE" debug-file-dex "$MODPATH"; fi
 mkdir -p "$MODPATH/bin" "$MODPATH/webroot"
 extract "$ZIPFILE" "bin/$ABI/fpconfig" "$MODPATH/bin" true
-for name in index.html app.js module-update.js style.css compat.js host-insets.js sodium.js LICENSES.txt manifest.json donate-wechat.svg icons/wechat.svg icons/alipay.svg icons/taobao.svg icons/qq.svg icons/unionpay.svg; do
+set_perm "$MODPATH/bin/fpconfig" 0 0 0755
+extract "$ZIPFILE" webroot/manifest.json "$MODPATH/webroot" true
+"$MODPATH/bin/fpconfig" webui-files "$MODPATH/webroot/manifest.json" > "$TMPDIR/webui-files" || abort '! Invalid WebUI manifest'
+while IFS= read -r name; do
   destination="$MODPATH/webroot/$(dirname "$name")"
   mkdir -p "$destination"
   extract "$ZIPFILE" "webroot/$name" "$destination" true
-done
+done < "$TMPDIR/webui-files"
 mkdir -p "$MODPATH/zygisk"
 extract "$ZIPFILE" "lib/$ABI32/lib$MODULE_LIB_NAME.so" "$MODPATH/zygisk" true
 mv "$MODPATH/zygisk/lib$MODULE_LIB_NAME.so" "$MODPATH/zygisk/$ABI32.so"

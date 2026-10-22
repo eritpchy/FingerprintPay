@@ -253,6 +253,27 @@ int main(int argc, char** argv) {
     if (getuid() != 0) { std::cerr << "FP_CONFIG_ERROR:ROOT_REQUIRED" << std::endl; return 1; }
     if (sodium_init() < 0) return 1;
     try {
+        if (argc == 3 && std::string(argv[1]) == "webui-files") {
+            auto manifest = json::parse(read_file(argv[2]));
+            const auto& files = manifest.at("files");
+            if (manifest.at("schema") != 1 || manifest.at("target") != "ES5"
+                    || !files.is_object() || files.empty() || files.size() > 256)
+                throw std::runtime_error("Invalid WebUI manifest");
+            std::string names;
+            for (auto it = files.begin(); it != files.end(); ++it) {
+                const auto& name = it.key();
+                if (name.empty() || name.size() > 256 || name.front() == '/' || name.back() == '/' || name.back() == '.'
+                        || name == "manifest.json" || name.find("..") != std::string::npos
+                        || name.find("//") != std::string::npos || name.find("./") != std::string::npos
+                        || !std::all_of(name.begin(), name.end(), [](unsigned char c) {
+                            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                                    || c == '/' || c == '.' || c == '_' || c == '-';
+                        })) throw std::runtime_error("Invalid WebUI path");
+                names += name + '\n';
+            }
+            std::cout << names;
+            return 0;
+        }
         if (argc == 2 && std::string(argv[1]) == "rezygisk-status") {
             std::cout << fp::rezygisk_status(read_file("/data/adb/rezygisk/state.json")) << std::endl;
             return 0;

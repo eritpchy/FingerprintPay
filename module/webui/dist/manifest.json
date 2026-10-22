@@ -3,14 +3,14 @@
   "target": "ES5",
   "files": {
     "LICENSES.txt": {
-      "sourceSha256": "db91a4f212b0efe837aaaa5024eab1f70411f34bbbc3fd517ca9ada19231c52d",
-      "sha256": "db91a4f212b0efe837aaaa5024eab1f70411f34bbbc3fd517ca9ada19231c52d",
-      "bytes": 2916
+      "sourceSha256": "8e12d5e2f9d3c1e4d212fcbf6943db36115376adb908e6735f71a42ad5e72d3c",
+      "sha256": "8e12d5e2f9d3c1e4d212fcbf6943db36115376adb908e6735f71a42ad5e72d3c",
+      "bytes": 4360
     },
     "app.js": {
-      "sourceSha256": "201c4c106735ba6f60dd060723bcf2a56b480dd3cea0e7f6676b3e15c5f7e90f",
-      "sha256": "d62657568e265857cdc361ae92a5e683228cfa0f7395768b8e95f65eaf3bb1b5",
-      "bytes": 39066
+      "sourceSha256": "98b0305f42ad17d398a421a278265795d176d962dd09a2da1aada9dc2c695e89",
+      "sha256": "cd95796512812ef8f29e27bd6913e835b818b27a951a448dce660514756339dd",
+      "bytes": 37390
     },
     "compat.js": {
       "sourceSha256": "a2897f71d9c1ed191c46fdba26a638bbb7f42dcd06d0dee52e215ec9cd108589",
@@ -28,9 +28,9 @@
       "bytes": 2596
     },
     "icons/alipay.svg": {
-      "sourceSha256": "d3188824e0b763625bf82d75bf561cf9759c3fbefb7ee0bb9ef7fe5fee09bdb6",
-      "sha256": "d3188824e0b763625bf82d75bf561cf9759c3fbefb7ee0bb9ef7fe5fee09bdb6",
-      "bytes": 814
+      "sourceSha256": "d3db8e44639595db05fa8cd459e9c37b83d936226eae953a75fd802e18fb4c16",
+      "sha256": "d3db8e44639595db05fa8cd459e9c37b83d936226eae953a75fd802e18fb4c16",
+      "bytes": 1404
     },
     "icons/qq.svg": {
       "sourceSha256": "1228ea1d731b64c01fae008d68aa41e4f9a5ffb217a14ca303e51ebd24ee039d",
@@ -43,9 +43,9 @@
       "bytes": 4396
     },
     "icons/unionpay.svg": {
-      "sourceSha256": "9d25c8d5603c994a4dfac20665255320b2a54a628b14342c9de82f0a68517fde",
-      "sha256": "9d25c8d5603c994a4dfac20665255320b2a54a628b14342c9de82f0a68517fde",
-      "bytes": 188
+      "sourceSha256": "25632b7ef3e8e1f1e62602cd4847d8b0fc08495474f643e3281de78015c5e89a",
+      "sha256": "25632b7ef3e8e1f1e62602cd4847d8b0fc08495474f643e3281de78015c5e89a",
+      "bytes": 9814
     },
     "icons/wechat.svg": {
       "sourceSha256": "b9b0d88e693f80e2ce12c11094fdff2cd04443737778af10c9b53005586a1faf",
@@ -53,8 +53,8 @@
       "bytes": 1342
     },
     "index.html": {
-      "sourceSha256": "78927d0469135adb4d51a151d92e5e02c0db6142f8adcc4584a261a9ed222395",
-      "sha256": "ad391701e0faf62957c62777388b09d3e4bfaa4524c419422760a40dc56b5122",
+      "sourceSha256": "281bba37ab708de4294636cad0814bfc76761afd50c8314699941856597ab203",
+      "sha256": "4dd5ced8db31f695b9abe0072f94e88e0caedd033025d24ab27d8f5571070c19",
       "bytes": 15759
     },
     "module-update.js": {
@@ -68,9 +68,9 @@
       "bytes": 748912
     },
     "style.css": {
-      "sourceSha256": "113c5e75e11d3b4aa08e17ab179f5801e512579df7dac96ac0e2eb96b84a96ec",
-      "sha256": "b1f9891a2c1824f1e55825cb3d81554489701df6b5f2a6ba38d41810386571b9",
-      "bytes": 12028
+      "sourceSha256": "e00331cf11646b260af60cd99de42171737312aab445380bab3ee3976af33d0b",
+      "sha256": "fb270d6e21adb5f37ce80d64cac19cc489a560dc80c9ece8a1a182d43715b3c4",
+      "bytes": 12088
     }
   }
 }

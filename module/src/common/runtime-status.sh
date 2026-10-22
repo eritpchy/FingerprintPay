@@ -15,11 +15,26 @@ runtime_active() {
   done
   return 1
 }
+magisk_active() {
+  command -v magisk >/dev/null 2>&1 || return 1
+  for pid in $(pidof zygote zygote64 2>/dev/null); do
+    if grep -qE '/system/lib(64)?/libzygisk\.so' "/proc/$pid/maps" 2>/dev/null; then return 0; fi
+  done
+  magisk_path=$(bounded magisk --path 2>/dev/null) || return 1
+  [ -n "$magisk_path" ] || return 1
+  for pid in $(pidof zygiskd zygiskd32 zygiskd64 2>/dev/null); do
+    executable=$(readlink "/proc/$pid/exe" 2>/dev/null)
+    case "$executable" in "$magisk_path/magisk"|"$magisk_path/magisk32"|"$magisk_path/magisk64") return 0 ;; esac
+  done
+  return 1
+}
 probe_framework() {
   framework=Zygisk
   state=unknown
   provider=''
   disabled_provider=''
+  # Installed providers and next-boot settings do not identify the running injector.
+  if magisk_active; then framework=Magisk; state=active; return; fi
   for candidate in "$NEXT" "$REZYGISK"; do
     [ -d "$candidate" ] || continue
     [ -n "$disabled_provider" ] || disabled_provider=$candidate
