@@ -42,7 +42,7 @@ public final class ConfigContract {
         return new JSONObject().put("scope", true).put("switch_on1", false)
                 .put("fingerprint_icon", false).put("biometric_api", false)
                 .put("volume_down_monitor_enabled", true).put("credentialVersion", 0)
-                .put("hasPassword", false).put("migrated", false);
+                .put("hasPassword", false);
     }
     public static void validate(String key, Object value) {
         if (!OPTIONS.contains(key) && !global(key)) throw new IllegalArgumentException("Unknown option");

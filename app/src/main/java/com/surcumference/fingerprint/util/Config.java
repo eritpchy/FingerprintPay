@@ -15,59 +15,50 @@ import java.util.Locale;
  * Created by Jason on 2017/9/9.
  */
 public final class Config {
-    private final Context context;
+    private static final java.util.Set<String> cleanedLegacyPackages = new java.util.HashSet<>();
     private final String pkg;
     private final ConfigStore store;
     public static Config from(Context context) { return new Config(context); }
     private Config(Context context) {
-        this.context = context;
         pkg = ConfigContract.PACKAGES.contains(context.getPackageName()) ? context.getPackageName() : ConfigContract.PACKAGES.get(0);
         store = ConfigStores.forContext(context);
-        migrate();
+        cleanupLegacy(context);
     }
     private JSONObject request(String op) throws Exception {
         return new JSONObject().put("op", op).put("package", pkg).put("user", android.os.Process.myUid() / 100000);
     }
     private JSONObject read() throws Exception { return store.request(request("read")); }
     public JSONObject snapshot() throws Exception { return read(); }
-    private void migrate() {
-        if (BuildConfig.APPLICATION_ID.equals(context.getPackageName())) return;
-        SharedPreferences old = context.getSharedPreferences(BuildConfig.APPLICATION_ID + ".settings", Context.MODE_PRIVATE);
-        if (old.getAll().isEmpty()) return;
+    private static synchronized void cleanupLegacy(Context context) {
+        String pkg = context.getPackageName();
+        if (!ConfigContract.PACKAGES.contains(pkg) || cleanedLegacyPackages.contains(pkg)) return;
         try {
-            JSONObject current = read();
-            if (!current.getJSONObject("settings").optBoolean("migrated")) {
-                JSONObject values = new JSONObject();
-                for (String key : ConfigContract.OPTIONS) if (!"scope".equals(key) && !"switch_on1".equals(key) && old.contains(key)) values.put(key, old.getBoolean(key, false));
-                if (old.contains("license_agree")) values.put("license_agree", old.getBoolean("license_agree", false));
-                if (old.contains("skip_version")) values.put(skipKey(), old.getString("skip_version", ""));
-                store.request(request("migrate").put("revision", current.getLong("revision")).put("values", values));
-            }
+            String name = BuildConfig.APPLICATION_ID + ".settings";
+            SharedPreferences old = context.getSharedPreferences(name, Context.MODE_PRIVATE);
             SharedPreferences.Editor edit = old.edit();
             for (String key : new String[]{"switch_on1", "password", "password_iv", "fingerprint_icon", "biometric_api",
                     "volume_down_monitor_enabled", "skip_version", "license_agree"}) edit.remove(key);
-            if (edit.commit() && old.getAll().isEmpty()) {
-                if (android.os.Build.VERSION.SDK_INT >= 24) context.deleteSharedPreferences(BuildConfig.APPLICATION_ID + ".settings");
+            if (!edit.commit()) return;
+            boolean complete = true;
+            if (old.getAll().isEmpty()) {
+                if (android.os.Build.VERSION.SDK_INT >= 24) complete = context.deleteSharedPreferences(name);
                 else {
-                    java.io.File file = new java.io.File(context.getApplicationInfo().dataDir, "shared_prefs/" + BuildConfig.APPLICATION_ID + ".settings.xml");
-                    file.delete(); new java.io.File(file.getPath() + ".bak").delete();
+                    java.io.File file = new java.io.File(context.getApplicationInfo().dataDir, "shared_prefs/" + name + ".xml");
+                    if (file.exists() && !file.delete()) complete = false;
+                    java.io.File backup = new java.io.File(file.getPath() + ".bak");
+                    if (backup.exists() && !backup.delete()) complete = false;
                 }
             }
-            cleanupLegacyPayloads();
-            if (!current.getJSONObject("settings").optBoolean("migrated"))
-                Task.onMain(() -> android.widget.Toast.makeText(context, "配置已迁移，请重新录入支付密码后启用指纹支付", android.widget.Toast.LENGTH_LONG).show());
-        } catch (Exception ignored) { /* Keep the import source until the central store confirms it. */ }
-    }
-    private void cleanupLegacyPayloads() {
-        String[] apps = {"wechat", "alipay", "taobao", "qq", "unionpay"};
-        java.io.File directory = context.getFilesDir();
-        for (String framework : new String[]{"zygisk", "riru"}) for (String app : apps) {
-            for (String suffix : new String[]{".apk", ".dex", ".debug.apk", ".debug.apk.crc"}) {
-                java.io.File file = new java.io.File(directory, framework + "-module-xfingerprint-pay-" + app + suffix);
-                try { if (file.isFile() && file.getCanonicalPath().equals(file.getAbsolutePath())) file.delete(); }
-                catch (java.io.IOException ignored) {}
+            String[] apps = {"wechat", "alipay", "taobao", "qq", "unionpay"};
+            java.io.File directory = context.getFilesDir();
+            for (String framework : new String[]{"zygisk", "riru"}) for (String app : apps) {
+                for (String suffix : new String[]{".apk", ".dex", ".debug.apk", ".debug.apk.crc"}) {
+                    java.io.File file = new java.io.File(directory, framework + "-module-xfingerprint-pay-" + app + suffix);
+                    if (file.isFile() && file.getCanonicalPath().equals(file.getAbsolutePath()) && !file.delete()) complete = false;
+                }
             }
-        }
+            if (complete) cleanedLegacyPackages.add(pkg);
+        } catch (Exception ignored) {}
     }
     private boolean option(String key, boolean fallback) {
         try { JSONObject value = read(); return value.getJSONObject(ConfigContract.global(key) ? "globals" : "settings").optBoolean(key, fallback); }

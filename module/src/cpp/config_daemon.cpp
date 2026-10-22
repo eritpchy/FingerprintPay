@@ -102,7 +102,7 @@ static void validate_record(const json& record, int user, const std::string& pkg
             || record.at("keyAlias") != prefix + std::to_string(user) + "." + pkg + "." + id
             || iv.size() != 12 || data.size() < 17 || data.size() > 1040) throw std::runtime_error("Invalid password record");
 }
-static json defaults() { return {{"scope", true}, {"switch_on1", false}, {"fingerprint_icon", false}, {"biometric_api", false}, {"volume_down_monitor_enabled", true}, {"credentialVersion", 0}, {"hasPassword", false}, {"migrated", false}}; }
+static json defaults() { return {{"scope", true}, {"switch_on1", false}, {"fingerprint_icon", false}, {"biometric_api", false}, {"volume_down_monitor_enabled", true}, {"credentialVersion", 0}, {"hasPassword", false}}; }
 static bool belongs(uid_t uid, const std::string& pkg) {
     std::ifstream list(package_list); std::string line, name; unsigned app_id;
     while (std::getline(list, line)) { std::istringstream row(line); if (row >> name >> app_id && name == pkg && app_id == uid % 100000) return true; }
@@ -168,7 +168,7 @@ static json handle(const json& req, uid_t uid) {
     }
     if (op != "read") {
         if (req.at("revision") != revision) throw std::runtime_error("Configuration changed; refresh and retry");
-        if (op == "patch" || op == "migrate" || op == "installScope") {
+        if (op == "patch" || op == "installScope") {
             if (op == "installScope") {
                 if (uid || req.at("values").size() != 1 || !req.at("values").contains("scope") || !req.at("values").at("scope").is_boolean()) throw std::runtime_error("Management access denied");
                 std::string prior = read_file(root + "/scope-defaults.json");
@@ -176,18 +176,15 @@ static json handle(const json& req, uid_t uid) {
                 scopes[pkg] = req.at("values").at("scope");
                 atomic_write(root + "/scope-defaults.json", scopes.dump());
             }
-            if (op != "migrate" || !settings.value("migrated", false)) {
-                for (auto it = req.at("values").begin(); it != req.at("values").end(); ++it) {
-                    const auto& k = it.key(); const auto& v = it.value();
-                    if (!global_key(k) && std::find(options.begin(), options.end(), k) == options.end()) throw std::runtime_error("Unknown option");
-                    if (k.rfind("skip_", 0) == 0) { if (!v.is_string() || v.get<std::string>().size() > 128) throw std::runtime_error("Invalid version"); }
-                    else if (!v.is_boolean()) throw std::runtime_error("Expected boolean");
-                    if (global_key(k)) { if (op != "migrate" || !doc.value("globalMigrated", false)) globals[k] = v; } else settings[k] = v;
-                }
-                if (op == "migrate" && !settings.contains("secret")) settings["switch_on1"] = false;
-                if (settings.value("biometric_api", false)) settings["volume_down_monitor_enabled"] = false;
-                if (settings.value("switch_on1", false) && (!settings.contains("secret") || !globals.value("license_agree", false))) throw std::runtime_error("Accept the license and set a password first");
+            for (auto it = req.at("values").begin(); it != req.at("values").end(); ++it) {
+                const auto& k = it.key(); const auto& v = it.value();
+                if (!global_key(k) && std::find(options.begin(), options.end(), k) == options.end()) throw std::runtime_error("Unknown option");
+                if (k.rfind("skip_", 0) == 0) { if (!v.is_string() || v.get<std::string>().size() > 128) throw std::runtime_error("Invalid version"); }
+                else if (!v.is_boolean()) throw std::runtime_error("Expected boolean");
+                if (global_key(k)) globals[k] = v; else settings[k] = v;
             }
+            if (settings.value("biometric_api", false)) settings["volume_down_monitor_enabled"] = false;
+            if (settings.value("switch_on1", false) && (!settings.contains("secret") || !globals.value("license_agree", false))) throw std::runtime_error("Accept the license and set a password first");
         } else if (op == "password") {
             std::string password;
             struct Wipe { std::string& value; ~Wipe() { sodium_memzero(&value[0], value.size()); } } wipe{password};
@@ -217,11 +214,6 @@ static json handle(const json& req, uid_t uid) {
             settings["secret"] = req.at("record"); settings["hasPassword"] = true; settings["requiresReentry"] = false; settings["credentialVersion"] = version + 1;
             settings.erase("legacySecret"); settings.erase("legacyNonce");
         } else throw std::runtime_error("Unknown operation");
-        if (req.contains("values")) for (auto it = req["values"].begin(); it != req["values"].end(); ++it) {
-            if (global_key(it.key())) doc["globalMigrated"] = true;
-            else if (op != "installScope") settings["migrated"] = true;
-        }
-        if (op == "migrate" || op == "password" || op == "commitPassword") settings["migrated"] = true;
         apps[pkg] = settings; doc["revision"] = ++revision;
         atomic_write(path, doc.dump());
         if (op == "commitPassword") pending.at(target)->finish("done");

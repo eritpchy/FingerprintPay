@@ -43,7 +43,6 @@ public final class LocalConfigStore implements ConfigStore {
         if (old.contains("license_agree")) globals.put("license_agree", old.getBoolean("license_agree", false));
         if (old.contains("skip_version")) globals.put("skip_xposed", old.getString("skip_version", ""));
         if (launcher.contains("show_icon")) globals.put("show_icon", launcher.getBoolean("show_icon", true));
-        if (old.contains("license_agree") || old.contains("skip_version")) doc.put("globalMigrated", true);
         if (!preferences.edit().putString("document", doc.toString()).commit()) throw new IllegalStateException("Cannot initialize configuration");
         old.edit().remove("license_agree").remove("skip_version").commit();
         launcher.edit().remove("show_icon").commit();
@@ -79,26 +78,18 @@ public final class LocalConfigStore implements ConfigStore {
             }
             if (!"read".equals(op)) {
                 if (request.getLong("revision") != revision) throw new IllegalStateException("Configuration changed; refresh and retry");
-                if ("patch".equals(op) || "migrate".equals(op)) {
-                    if (!"migrate".equals(op) || !settings.optBoolean("migrated")) {
-                        JSONObject values = request.getJSONObject("values");
-                        Iterator<String> keys = values.keys();
-                        while (keys.hasNext()) {
-                            String name = keys.next(); Object value = values.get(name);
-                            ConfigContract.validate(name, value);
-                            if (ConfigContract.global(name)) {
-                                if (!"migrate".equals(op) || !doc.optBoolean("globalMigrated")) globals.put(name, value);
-                            } else settings.put(name, value);
-                        }
-                        if ("migrate".equals(op)) {
-                            // A WebUI edit wins over an unimported host preference file.
-                            settings.put("migrated", true);
-                            if (!settings.has("secret")) settings.put("switch_on1", false);
-                        }
-                        if (settings.optBoolean("biometric_api")) settings.put("volume_down_monitor_enabled", false);
-                        if (settings.optBoolean("switch_on1") && (!settings.has("secret") || !globals.optBoolean("license_agree"))) {
-                            throw new IllegalStateException("Accept the license and set a password first");
-                        }
+                if ("patch".equals(op)) {
+                    JSONObject values = request.getJSONObject("values");
+                    Iterator<String> keys = values.keys();
+                    while (keys.hasNext()) {
+                        String name = keys.next(); Object value = values.get(name);
+                        ConfigContract.validate(name, value);
+                        if (ConfigContract.global(name)) globals.put(name, value);
+                        else settings.put(name, value);
+                    }
+                    if (settings.optBoolean("biometric_api")) settings.put("volume_down_monitor_enabled", false);
+                    if (settings.optBoolean("switch_on1") && (!settings.has("secret") || !globals.optBoolean("license_agree"))) {
+                        throw new IllegalStateException("Accept the license and set a password first");
                     }
                 } else if ("password".equals(op)) {
                     String password = request.getString("password");
@@ -122,14 +113,6 @@ public final class LocalConfigStore implements ConfigStore {
                     settings.put("secret", record).put("hasPassword", true).put("requiresReentry", false).put("credentialVersion", version + 1);
                     settings.remove("legacySecret");
                 } else throw new IllegalArgumentException("Unknown operation");
-                if ("password".equals(op) || "commitPassword".equals(op)) settings.put("migrated", true);
-                if (request.optJSONObject("values") != null) {
-                    Iterator<String> keys = request.getJSONObject("values").keys();
-                    while (keys.hasNext()) {
-                        if (ConfigContract.global(keys.next())) doc.put("globalMigrated", true);
-                        else settings.put("migrated", true);
-                    }
-                }
                 apps.put(pkg, settings); doc.put("revision", ++revision);
                 snapshot.invalidate();
                 if (!preferences.edit().putString("document", doc.toString()).commit()) throw new IllegalStateException("Cannot save configuration");
