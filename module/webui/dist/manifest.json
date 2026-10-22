@@ -59,8 +59,8 @@
     },
     "module-update.js": {
       "sourceSha256": "955de2b6aa477ec18e4c50ad64d387de1e6ed3f9cde559d34bf0296a1ae1e33d",
-      "sha256": "9af333b0ea10a7c92ab0a4e7d3f36c4bd3081e48ecca363c16d8839f074d94a7",
-      "bytes": 3575
+      "sha256": "ad3320c11d442d22602f00fe738c7864ffcfdbe496d84f0dce291fb1374406c2",
+      "bytes": 4134
     },
     "sodium.js": {
       "sourceSha256": "1419e10cb7765aed5e8c924ff48137753df2d80e24c8e49415c95aaa13b99561",
