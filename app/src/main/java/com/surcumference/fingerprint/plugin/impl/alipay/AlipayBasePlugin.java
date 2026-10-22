@@ -12,6 +12,7 @@ import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.EditText;
 import android.widget.TextView;
 
@@ -59,6 +60,7 @@ public class AlipayBasePlugin implements IAppPlugin {
     private View mLayoutRoot;
     private ViewTreeObserver.OnGlobalLayoutListener mLayoutListener;
     private String mPaymentCredential;
+    private String mPaymentMethod;
     private boolean mPasswordRejected;
 
     @Override
@@ -180,7 +182,7 @@ public class AlipayBasePlugin implements IAppPlugin {
         View target = rejected ? null : findPasswordTarget(activity);
         if (rejected && !mPasswordRejected) PaymentPasswordGuard.rejected(mPaymentSession.target() instanceof View
                 ? (View) mPaymentSession.target() : activity.getWindow().getDecorView());
-        if (!rejected && !PaymentPasswordGuard.ready(config, target)) return false;
+        if (!rejected && target != null && !PaymentPasswordGuard.ready(config, target)) return false;
         if (!beginPasswordStage(activity, target, encrypted, rejected)) return false;
         final long token = mPaymentSession.token();
         mPaymentSession.restoreWith(token, () -> restorePassword(token));
@@ -269,6 +271,7 @@ public class AlipayBasePlugin implements IAppPlugin {
         }
         if (mCurrentActivity == activity) {
             mPaymentCredential = null;
+            mPaymentMethod = null;
             mPasswordRejected = false;
             removeLayoutListener();
             mCurrentActivity = null;
@@ -283,6 +286,10 @@ public class AlipayBasePlugin implements IAppPlugin {
             return false;
         }
         Object previous = mPaymentSession.target();
+        String paymentMethod = findSelectedPaymentMethod(activity.getWindow().getDecorView());
+        boolean newPaymentMethod = previous != null && mPaymentMethod != null && paymentMethod != null
+                && !TextUtils.equals(mPaymentMethod, paymentMethod);
+        if (paymentMethod != null) mPaymentMethod = paymentMethod;
         boolean newCredential = (previous != null || mPasswordRejected)
                 && !TextUtils.equals(mPaymentCredential, credential);
         boolean newTarget = previous != null && target != null && previous != target
@@ -293,11 +300,41 @@ public class AlipayBasePlugin implements IAppPlugin {
         if (newCredential || newTarget || leftStage) {
             mPaymentSession.close(activity);
             mPasswordRejected = false;
+        } else if (newPaymentMethod && !mPasswordRejected) {
+            mPaymentSession.close(activity);
         }
         if (target == null || mPasswordRejected
                 || !mPaymentSession.begin(activity, target, SystemClock.uptimeMillis())) return false;
         mPaymentCredential = credential;
         return true;
+    }
+
+    private String findSelectedPaymentMethod(View view) {
+        if (!view.isShown() || view.getAlpha() <= 0) return null;
+        if (view.isClickable() && ViewUtils.isViewVisibleInScreen(view)) {
+            AccessibilityNodeInfo node = view.createAccessibilityNodeInfo();
+            if (node != null) {
+                try {
+                    CharSequence description = node.getContentDescription();
+                    if (description != null) {
+                        String label = description.toString().replace('\uff0c', ',');
+                        for (String prefix : new String[]{"已选中,", "选中,", "已選中,", "選中,"}) {
+                            if (!label.startsWith(prefix)) continue;
+                            int hint = label.indexOf(",支付渠道说明内容:");
+                            return label.substring(prefix.length(), hint < 0 ? label.length() : hint);
+                        }
+                    }
+                } finally { node.recycle(); }
+            }
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                String method = findSelectedPaymentMethod(group.getChildAt(i));
+                if (method != null) return method;
+            }
+        }
+        return null;
     }
 
     private void removeLayoutListener() {
