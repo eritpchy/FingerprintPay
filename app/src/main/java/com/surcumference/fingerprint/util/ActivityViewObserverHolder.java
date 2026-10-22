@@ -6,8 +6,8 @@ import java.util.Map;
 
 public final class ActivityViewObserverHolder {
     public enum Key {
-        AlipayPasswordView, TaobaoPasswordView,
-        WeChatPayView, WeChatPaymentMethodView, UnionPayPasswordView,
+        TaobaoPasswordView,
+        WeChatPayView, UnionPayPasswordView,
     }
     private static final Map<Key, Registration> HOLDER = new EnumMap<>(Key.class);
     private static final class Registration {

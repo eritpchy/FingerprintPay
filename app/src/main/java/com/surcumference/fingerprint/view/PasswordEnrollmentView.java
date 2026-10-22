@@ -25,7 +25,6 @@ public final class PasswordEnrollmentView extends DialogFrameLayout<PasswordEnro
     private final ImageView fingerprint;
     private final FrameLayout icon;
 
-    @androidx.annotation.Keep
     public PasswordEnrollmentView(Context context) {
         super(context);
         if (Build.VERSION.SDK_INT >= 29) setForceDarkAllowed(false);
@@ -73,12 +72,12 @@ public final class PasswordEnrollmentView extends DialogFrameLayout<PasswordEnro
         circle.setShape(GradientDrawable.OVAL); circle.setColor(StyleUtils.pressedColor(getContext()));
         icon.setBackground(circle);
     }
-    @androidx.annotation.Keep public void retry() { status.setText("指纹未匹配，请重试"); }
-    @androidx.annotation.Keep public void saved() { status.setText("密码已保存"); }
+    public void retry() { status.setText("指纹未匹配，请重试"); }
+    public void saved() { status.setText("密码已保存"); }
 
     @Override protected int dialogCornerRadius() { return dp(24); }
 
-    @androidx.annotation.Keep @Override public AlertDialog showInDialog() {
+    @Override public AlertDialog showInDialog() {
         AlertDialog dialog = super.showInDialog();
         dialog.setCanceledOnTouchOutside(false);
         fitWindow();

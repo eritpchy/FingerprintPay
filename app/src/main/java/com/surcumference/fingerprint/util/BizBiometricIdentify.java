@@ -9,8 +9,6 @@ import com.surcumference.fingerprint.plugin.PluginApp;
 import javax.crypto.Cipher;
 import org.json.JSONObject;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 
 import com.hjq.toast.Toaster;
 import com.surcumference.fingerprint.Lang;
@@ -22,7 +20,7 @@ public class BizBiometricIdentify extends XBiometricIdentify<BizBiometricIdentif
 
     private final Context context;
     public BizBiometricIdentify(Context context) {
-        super(AESUtils.INSTANCE, context);
+        super(context);
         this.context = context;
         Config config = Config.from(context);
         withUseBiometricApi(config.isUseBiometricApi());

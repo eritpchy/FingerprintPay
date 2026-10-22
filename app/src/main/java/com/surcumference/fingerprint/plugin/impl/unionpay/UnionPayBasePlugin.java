@@ -6,9 +6,7 @@ import android.app.Activity;
 import com.surcumference.fingerprint.util.PaymentPasswordGuard;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.os.Build;
 import android.os.Bundle;
-import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewTreeObserver;
 
@@ -23,7 +21,6 @@ import com.surcumference.fingerprint.plugin.inf.IMockCurrentUser;
 import com.surcumference.fingerprint.plugin.inf.OnFingerprintVerificationOKListener;
 import com.surcumference.fingerprint.util.ActivityViewObserver;
 import com.surcumference.fingerprint.util.ActivityViewObserverHolder;
-import com.surcumference.fingerprint.util.ApplicationUtils;
 import com.surcumference.fingerprint.util.BizBiometricIdentify;
 import com.surcumference.fingerprint.util.BlackListUtils;
 import com.surcumference.fingerprint.util.Config;
@@ -53,20 +50,10 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
     private WeakHashMap<View, View.OnAttachStateChangeListener> mView2OnAttachStateChangeListenerMap = new WeakHashMap<>();
     protected boolean mMockCurrentUser = false;
     protected XBiometricIdentify mFingerprintIdentify;
-    private int mWeChatVersionCode = 0;
     private boolean mFingerprintIdentifyTemporaryBlocking = false;
 
 
     private Map<Activity, Boolean> mActivityResumedMap = new WeakHashMap<>();
-
-    @Override
-    public int getVersionCode(Context context) {
-        if (mWeChatVersionCode != 0) {
-            return mWeChatVersionCode;
-        }
-        mWeChatVersionCode = ApplicationUtils.getPackageVersionCode(context, PACKAGE_NAME_UNIONPAY);
-        return mWeChatVersionCode;
-    }
 
     protected synchronized void initFingerPrintLock(Context context,
                                                     AlertDialog dialog, String passwordEncrypted,
@@ -226,18 +213,6 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
             if (mPayment.isActive(token)) mFingerPrintAlertDialog = fingerPrintAlertDialog;
             else DialogUtils.dismiss(fingerPrintAlertDialog);
         } catch (OutOfMemoryError e) {
-        }
-    }
-
-    private void retryWatchPayViewIfPossible(Activity activity, View rootView, int countDown, int delayMS) {
-        if (!ActivityContext.isAlive(activity) || !mActivityResumedMap.containsKey(activity)) return;
-        View payTitleTextView = ViewUtils.findViewByText(rootView, "请输入支付密码", "Input payment password");
-        if (payTitleTextView == null
-                || !(ViewUtils.isViewVisibleInScreen(payTitleTextView) && ViewUtils.isShownInScreen(payTitleTextView))) {
-            watchPayView(activity);
-        }
-        if (countDown > 0) {
-            Task.onMain(delayMS, () -> retryWatchPayViewIfPossible(activity, rootView, countDown - 1, delayMS));
         }
     }
 

@@ -50,11 +50,6 @@ public class Lang {
         STRINGS.put(R.id.downloading, tr("下载中", "下載中", "Downloading"));
         STRINGS.put(R.id.download_title_failed, tr("下载出错", "下載出錯", "Download failed"));
         STRINGS.put(R.id.ok, tr("确定", "确定", "OK"));
-        STRINGS.put(R.id.settings_title_taobao, tr("淘宝", "淘寶", "Taobao"));
-        STRINGS.put(R.id.settings_title_alipay, tr("支付宝", "支付寶", "Alipay"));
-        STRINGS.put(R.id.settings_title_wechat, tr("微信", "微信", "WeChat"));
-        STRINGS.put(R.id.settings_title_qq, tr("腾讯QQ", "騰訊QQ", "Tencent QQ"));
-        STRINGS.put(R.id.settings_title_unionpay, tr("云闪付", "雲閃付", "Union Pay"));
         STRINGS.put(R.id.fingerprint_verification, tr("请验证指纹", "請驗證指紋", "Fingerprint verification"));
         STRINGS.put(R.id.qq_payview_fingerprint_title, tr("请验证指纹", "請驗證指紋", "Verify fingerprint"));
         STRINGS.put(R.id.qq_payview_password_switch_text, tr("使用密码", "使用密碼", "Password"));

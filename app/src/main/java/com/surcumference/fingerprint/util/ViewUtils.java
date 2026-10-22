@@ -5,7 +5,6 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.res.Resources;
 import android.graphics.Rect;
-import android.os.Build;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
@@ -380,29 +379,12 @@ public class ViewUtils {
 
     public static List<View> getWindowManagerViews() {
         try {
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH &&
-                    Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
-
-                // get the list from WindowManagerImpl.mViews
-                Class wmiClass = Class.forName("android.view.WindowManagerImpl");
-                Object wmiInstance = wmiClass.getMethod("getDefault").invoke(null);
-
-                return viewsFromWM(wmiClass, wmiInstance);
-
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-
-                // get the list from WindowManagerGlobal.mViews
-                Class wmgClass = Class.forName("android.view.WindowManagerGlobal");
-                Object wmgInstance = wmgClass.getMethod("getInstance").invoke(null);
-
-                return viewsFromWM(wmgClass, wmgInstance);
-            }
-
+            Class wmgClass = Class.forName("android.view.WindowManagerGlobal");
+            Object wmgInstance = wmgClass.getMethod("getInstance").invoke(null);
+            return viewsFromWM(wmgClass, wmgInstance);
         } catch (Exception e) {
             e.printStackTrace();
         }
-
         return new ArrayList<View>();
     }
 
@@ -449,10 +431,8 @@ public class ViewUtils {
         if (!isShown(view)) {
             return false;
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            if (!view.isAttachedToWindow()) {
-                return false;
-            }
+        if (!view.isAttachedToWindow()) {
+            return false;
         }
         if (view.getAlpha() == 0) {
             return false;
@@ -494,37 +474,9 @@ public class ViewUtils {
         }
     }
 
-    public static View.OnClickListener getOnClickListener(View v) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
-            return getOnClickListenerV14(v);
-        } else {
-            return getOnClickListenerV(v);
-        }
-    }
-
-    //Used for APIs lower than ICS (API 14)
-    private static View.OnClickListener getOnClickListenerV(View view) {
-        View.OnClickListener retrievedListener = null;
-        String viewStr = "android.view.View";
-        Field field;
-        try {
-            //noinspection JavaReflectionMemberAccess
-            field = Class.forName(viewStr).getDeclaredField("mOnClickListener");
-            retrievedListener = (View.OnClickListener) field.get(view);
-        } catch (NoSuchFieldException ex) {
-            L.e("Reflection: No Such Field.");
-        } catch (IllegalAccessException ex) {
-            L.e("Reflection: Illegal Access.");
-        } catch (ClassNotFoundException ex) {
-            L.e("Reflection: Class Not Found.");
-        }
-        return retrievedListener;
-    }
-
-    //Used for new ListenerInfo class structure used beginning with API 14 (ICS)
     @SuppressWarnings("JavaReflectionMemberAccess")
     @SuppressLint("PrivateApi")
-    private static View.OnClickListener getOnClickListenerV14(View view) {
+    public static View.OnClickListener getOnClickListener(View view) {
         View.OnClickListener retrievedListener = null;
         String viewStr = "android.view.View";
         String lInfoStr = "android.view.View$ListenerInfo";

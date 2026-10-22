@@ -11,7 +11,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.text.TextUtils;
 import android.view.*;
 import android.widget.*;
 
@@ -76,7 +75,6 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
     private Activity mLiteAppActivity;
     private boolean mLiteAppFirstDetection;
 
-    @Override
     public int getVersionCode(Context context) {
         if (mWeChatVersionCode != 0) {
             return mWeChatVersionCode;
@@ -283,7 +281,6 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                 }
             }
             ActivityViewObserverHolder.stop(ActivityViewObserverHolder.Key.WeChatPayView);
-            ActivityViewObserverHolder.stop(ActivityViewObserverHolder.Key.WeChatPaymentMethodView);
             onPayDialogDismiss(activity, activity.getWindow().getDecorView(), DISMISS_NORMAL);
         } catch (Exception e) {
             L.e(e);
@@ -745,7 +742,6 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
 
     private void closePayment() {
         stopPaymentMethodWatch();
-        ActivityViewObserverHolder.stop(ActivityViewObserverHolder.Key.WeChatPaymentMethodView);
         Object owner = mPaymentSession.owner();
         restorePassword();
         mInputHandler.removeCallbacksAndMessages(null);

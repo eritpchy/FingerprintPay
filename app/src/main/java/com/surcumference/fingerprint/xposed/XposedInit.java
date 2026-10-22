@@ -52,7 +52,7 @@ public class XposedInit implements IXposedHookZygoteInit, IXposedHookLoadPackage
         }
         String active = System.getProperty("fingerprintpay.active.backend");
         if (active != null && !"Xposed".equals(active)) return;
-        com.surcumference.fingerprint.plugin.PluginApp.setup(com.surcumference.fingerprint.bean.PluginType.Xposed, null);
+        com.surcumference.fingerprint.plugin.PluginApp.setup(com.surcumference.fingerprint.bean.PluginType.Xposed);
         initHost(lpparam);
         initGeneric(lpparam);
     }

@@ -1,8 +1,5 @@
 package com.surcumference.fingerprint.plugin.impl.qq;
 
-import static com.surcumference.fingerprint.Constant.ICON_QQ_SETTING_ENTRY_DARK_BASE64;
-import static com.surcumference.fingerprint.Constant.ICON_QQ_SETTING_ENTRY_LIGHT_BASE64;
-import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_QQ;
 
 import android.app.Activity;
 import com.surcumference.fingerprint.util.PaymentPasswordGuard;
@@ -11,7 +8,6 @@ import android.graphics.Bitmap;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
-import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -31,7 +27,6 @@ import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.plugin.inf.IAppPlugin;
 import com.surcumference.fingerprint.plugin.inf.IMockCurrentUser;
 import com.surcumference.fingerprint.plugin.inf.OnFingerprintVerificationOKListener;
-import com.surcumference.fingerprint.util.ApplicationUtils;
 import com.surcumference.fingerprint.util.BizBiometricIdentify;
 import com.surcumference.fingerprint.util.Config;
 import com.surcumference.fingerprint.util.DpUtils;
@@ -56,8 +51,6 @@ public class QQBasePlugin implements IAppPlugin, IMockCurrentUser {
 
 
     private static final String TAG_FINGER_PRINT_IMAGE = "FINGER_PRINT_IMAGE";
-    private static final String TAG_PASSWORD_EDITTEXT = "TAG_PASSWORD_EDITTEXT";
-    private static final String TAG_LONGPASSWORD_OK_BUTTON = "TAG_LONGPASSWORD_OK_BUTTON";
     private static final String TAG_ACTIVITY_PAY = "TAG_ACTIVITY_PAY";
     private static final String TAG_ACTIVITY_FIRST_RESUME = "TAG_ACTIVITY_FIRST_RESUME";
 
@@ -68,24 +61,13 @@ public class QQBasePlugin implements IAppPlugin, IMockCurrentUser {
     private final PaymentController mPayment = new PaymentController();
     private Activity mWatchingActivity;
     private long mWatchGeneration;
-    private boolean mFingerprintScanStateReady = false;
     private WeakHashMap<Activity, String> mActivityPayMap = new WeakHashMap<>();
     private WeakHashMap<Activity, String> mActivityResumeMap = new WeakHashMap<>();
     private WeakHashMap<Activity, QQPayDialog> mActivityPayDialogMap = new WeakHashMap<>();
     private WeakHashMap<Activity, ViewTreeObserver.OnGlobalLayoutListener> mPayViewLayoutListenerMap = new WeakHashMap<>();
-    private int mQQVersionCode;
     private ViewTreeObserver.OnWindowAttachListener mPayWindowAttachListener;
     private boolean mPayDialogTemporaryBlocking = false;
     private boolean mFingerprintIdentifyTemporaryBlocking = false;
-
-    @Override
-    public int getVersionCode(Context context) {
-        if (mQQVersionCode != 0) {
-            return mQQVersionCode;
-        }
-        mQQVersionCode = ApplicationUtils.getPackageVersionCode(context, PACKAGE_NAME_QQ);
-        return mQQVersionCode;
-    }
 
     @Override
     public void onActivityCreated(@NonNull Activity activity, @Nullable Bundle savedInstanceState) {
@@ -280,7 +262,6 @@ public class QQBasePlugin implements IAppPlugin, IMockCurrentUser {
             return;
         }
         View fingerprintView = prepareFingerprintView(context);
-        int versionCode = getVersionCode(context);
 
         Runnable switchToPwdRunnable = () -> {
             if (!mPayment.owns(paymentToken[0])) return;
@@ -347,12 +328,6 @@ public class QQBasePlugin implements IAppPlugin, IMockCurrentUser {
                 payDialog.keyboardView.setAlpha(0);
                 if (payDialog.keyboardView.getVisibility() != View.INVISIBLE) {
                     payDialog.keyboardView.setVisibility(View.INVISIBLE);
-                    //fix切换支付方式后键盘会出现
-                    mPayment.later(paymentToken[0], 1000, () -> {
-                        if (mFingerprintScanStateReady) {
-                            payDialog.keyboardView.setVisibility(View.INVISIBLE);
-                        }
-                    });
                 }
             }
             if (fingerprintView.getVisibility() != View.VISIBLE) {
@@ -548,7 +523,6 @@ public class QQBasePlugin implements IAppPlugin, IMockCurrentUser {
     private void releaseFingerprintIdentify() {
         XBiometricIdentify identify = mFingerprintIdentify;
         mFingerprintIdentify = null;
-        mFingerprintScanStateReady = false;
         if (identify != null) identify.cancelIdentify();
     }
 

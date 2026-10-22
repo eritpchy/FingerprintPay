@@ -11,7 +11,6 @@ import com.surcumference.fingerprint.util.log.L;
 import com.wei.android.lib.fingerprintidentify.FingerprintIdentify;
 import com.wei.android.lib.fingerprintidentify.base.BaseFingerprint;
 import com.wei.android.lib.fingerprintidentify.bean.FingerprintIdentifyFailInfo;
-import com.wei.android.lib.fingerprintidentify.util.PasswordCipherHelper;
 
 import javax.crypto.Cipher;
 
@@ -19,32 +18,25 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
 
     private final Context context;
     private final FingerprintIdentify fingerprintIdentify;
-    private final ICryptoHandler cryptoHandler;
 
     private IMockCurrentUser mockCurrentUserCallback;
     public boolean fingerprintScanStateReady = false;
 
-    private String cipherFallbackKey;
-    private String cipherContent;
-    private boolean allowPasswordCipherFallback = false;
     private java.util.concurrent.Callable<Cipher> cipherFactory;
     private CipherAction cipherAction;
     private java.util.concurrent.Callable<String> softwareAction;
     private boolean authenticationOnly;
     private int operationMode;
-    private byte[] operationIV;
     private long identifyGeneration;
     private boolean identifyFinished = true;
-    private IdentifyListener lastIdentifyListener;
     private int remainingAttempts = 8;
     private String identifyStage = "idle";
 
-    public XBiometricIdentify(ICryptoHandler cryptoHandler, Context context) {
-        this(cryptoHandler, context, new FingerprintIdentify(context));
+    public XBiometricIdentify(Context context) {
+        this(context, new FingerprintIdentify(context));
     }
 
-    XBiometricIdentify(ICryptoHandler cryptoHandler, Context context, FingerprintIdentify fingerprintIdentify) {
-        this.cryptoHandler = cryptoHandler;
+    XBiometricIdentify(Context context, FingerprintIdentify fingerprintIdentify) {
         this.context = context;
 
         this.fingerprintIdentify = fingerprintIdentify;
@@ -59,24 +51,8 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
         return (T)this;
     }
 
-    public T withEncryptionMode(String cipherContent, String cipherFallbackKey) {
-        withCipherAction(Cipher.ENCRYPT_MODE, null, null);
-        this.cipherContent = cipherContent;
-        this.cipherFallbackKey = cipherFallbackKey;
-        fingerprintIdentify.setCipherMode(Cipher.ENCRYPT_MODE, null);
-        return (T)this;
-    }
-
-    public T withDecryptionMode(String cipherContent, byte[] cipherIV, String cipherFallbackKey) {
-        withCipherAction(Cipher.DECRYPT_MODE, null, null); operationIV = cipherIV;
-        this.cipherContent = cipherContent;
-        this.cipherFallbackKey = cipherFallbackKey;
-        fingerprintIdentify.setCipherMode(Cipher.DECRYPT_MODE, cipherIV);
-        return (T)this;
-    }
-
     public T withCipherAction(int mode, java.util.concurrent.Callable<Cipher> factory, CipherAction action) {
-        operationMode = mode; operationIV = null;
+        operationMode = mode;
         authenticationOnly = false; softwareAction = null;
         cipherFactory = factory;
         cipherAction = action;
@@ -101,11 +77,6 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
         return (T)this;
     }
 
-    public T withPasswordCipherFallback(boolean allow) {
-        this.allowPasswordCipherFallback = allow;
-        return (T)this;
-    }
-
     public T startIdentify(IdentifyListener identifyListener) {
         return startIdentify(identifyListener, false);
     }
@@ -117,7 +88,6 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
         manager.cancelFingerprintIdentify();
         final long generation = ++identifyGeneration;
         identifyFinished = false;
-        lastIdentifyListener = identifyListener;
         manager.set(this);
         final int cipherMode = operationMode;
         try {
@@ -149,7 +119,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
             final Cipher expectedCipher = preparedCipher;
             final boolean softwareOnly = authenticationOnly;
             // The fingerprint library uses decrypt-without-IV for authentication without a CryptoObject.
-            fingerprintIdentify.setCipherMode(softwareOnly ? Cipher.DECRYPT_MODE : cipherMode, softwareOnly ? null : operationIV);
+            fingerprintIdentify.setCipherMode(softwareOnly ? Cipher.DECRYPT_MODE : cipherMode, null);
             fingerprintIdentify.setCipher(expectedCipher);
             fingerprintScanStateReady = true;
             identifyListener.onInited(this);
@@ -169,12 +139,8 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
                         if (softwareOnly || cipher == null && softwareAction != null && cipherMode == Cipher.ENCRYPT_MODE) {
                             result = softwareAction.call();
                         } else {
-                            if (cipherAction != null && (cipher == null || cipher != expectedCipher)) throw new SecurityException("Biometric cipher mismatch");
-                            result = cipherAction != null ? cipherAction.run(cipher) : encryptionOrDecryption(cipherMode, cipher, cipherContent);
-                        }
-                        if (cipherAction == null && softwareAction == null && result == null && allowPasswordCipherFallback) {
-                            cipher = PasswordCipherHelper.createCipher(cipherMode, cipherFallbackKey);
-                            result = encryptionOrDecryption(cipherMode, cipher, cipherContent);
+                            if (cipherAction == null || cipher == null || cipher != expectedCipher) throw new SecurityException("Biometric cipher mismatch");
+                            result = cipherAction.run(cipher);
                         }
                         if (result == null) {
                             throw new IllegalStateException("Biometric cipher operation failed");
@@ -261,8 +227,6 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
         }
         identifyFinished = true;
         fingerprintScanStateReady = false;
-        lastIdentifyListener = null;
-        cipherContent = null;
         XBiometricIdentifyManager.INSTANCE.clear(this);
         callMockCurrentUserCallback(false);
         return true;
@@ -286,15 +250,6 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
         }
     }
 
-    @Nullable
-    private String encryptionOrDecryption(int cipherMode, Cipher cipher, String content) {
-        if (cipher == null) {
-            return null;
-        }
-        return cipherMode == Cipher.ENCRYPT_MODE
-                ? cryptoHandler.encrypt(cipher, content) : cryptoHandler.decrypt(cipher, content);
-    }
-
     public void cancelIdentify() {
         ++identifyGeneration;
         identifyFinished = true;
@@ -304,13 +259,6 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
             fingerprintIdentify.cancelIdentify();
         } finally {
             callMockCurrentUserCallback(false);
-        }
-    }
-
-    public void resumeIdentify() {
-        IdentifyListener listener = lastIdentifyListener;
-        if (listener != null) {
-            startIdentify(listener, true);
         }
     }
 
@@ -377,19 +325,6 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
             }
         }
 
-        public void onStartFailedByDeviceLocked(T identify) {
-            IdentifyListener<T> listener = this.parentIdentifyListener;
-            if (listener != null) {
-                listener.onStartFailedByDeviceLocked(identify);
-            }
-        }
-    }
-
-    public interface ICryptoHandler {
-        @Nullable
-        String decrypt(@NonNull Cipher cipher, @NonNull String content);
-        @Nullable
-        String encrypt(@NonNull Cipher cipher, @NonNull String content);
     }
 
     public enum NotifyEnum {

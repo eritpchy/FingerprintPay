@@ -7,7 +7,6 @@ import androidx.annotation.Nullable;
 import com.google.gson.Gson;
 import com.google.gson.annotations.SerializedName;
 import com.surcumference.fingerprint.bean.PluginType;
-import com.surcumference.fingerprint.plugin.PluginApp;
 import com.surcumference.fingerprint.util.log.L;
 
 import java.util.ArrayList;
@@ -37,11 +36,6 @@ public class GithubLatestInfo {
     public List<GithubAssetsInfo> assets = new ArrayList<>();
 
     @Nullable
-    public GithubAssetsInfo getDownloadAssetsInfo() {
-        return getDownloadAssetsInfo(PluginApp.getCurrentType());
-    }
-
-    @Nullable
     public GithubAssetsInfo getDownloadAssetsInfo(PluginType pluginType) {
         L.d("assets", new Gson().toJson(assets));
         if (assets.size() == 0) {
@@ -60,10 +54,6 @@ public class GithubLatestInfo {
             }
         }
         return null;
-    }
-
-    public boolean isDataComplete() {
-        return isDataComplete(PluginApp.getCurrentType());
     }
 
     public boolean isDataComplete(PluginType type) {

@@ -13,50 +13,13 @@ import com.surcumference.fingerprint.Constant;
 import com.surcumference.fingerprint.util.log.L;
 
 import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.StringReader;
 import java.util.concurrent.Callable;
 
 public class FileUtils {
-    /**
-     * 复制文件
-     *
-     * @param s 源文件
-     * @param t 复制到的新文件
-     */
-
-    public static boolean copy(File s, File t) {
-        FileInputStream fi = null;
-        FileOutputStream fo = null;
-        BufferedInputStream bis = null;
-        BufferedOutputStream bos = null;
-        try {
-            fi = new FileInputStream(s);
-            bis = new BufferedInputStream(fi);
-            fo = new FileOutputStream(t);
-            bos = new BufferedOutputStream(fo);
-
-            byte[] buf = new byte[1024];
-            int len;
-            while ((len = bis.read(buf)) > 0) {
-                bos.write(buf, 0, len);
-            }
-        } catch (Exception e) {
-            L.e(e);
-            return false;
-        } finally {
-            closeCloseable(fi);
-            closeCloseable(bis);
-            closeCloseable(bos);
-            closeCloseable(fo);
-        }
-        return true;
-    }
-
     public static void closeCloseable(Object cloeable) {
         try {
             if (cloeable == null) return;
@@ -77,7 +40,6 @@ public class FileUtils {
             String statusContent;
             FileInputStream fis = null;
             BufferedInputStream ir = null;
-            StringReader rd = null;
             try {
                 byte statusBytes[] = new byte[512];
                 fis = new FileInputStream(file);
@@ -90,7 +52,6 @@ public class FileUtils {
                 return statusContent;
             } catch (Exception | Error e) {
             } finally {
-                closeCloseable(rd);
                 closeCloseable(ir);
                 closeCloseable(fis);
             }
@@ -153,29 +114,4 @@ public class FileUtils {
     }
 
 
-    /**
-     * 递归删除目录下的所有文件及子目录下所有文件
-     *
-     * @param file 将要删除的文件目录
-     * @return boolean Returns "true" if all deletions were successful. If a
-     * deletion fails, the method stops attempting to delete and returns
-     * "false".
-     */
-    public static boolean delete(File file) {
-        if (file == null || !file.exists())
-            return true;
-
-        if (file.isDirectory()) {
-            String[] children = file.list();
-            // 递归删除目录中的子目录下
-            for (int i = 0; i < children.length; i++) {
-                boolean success = delete(new File(file, children[i]));
-                if (!success) {
-                    return false;
-                }
-            }
-        }
-        // 目录此时为空，可以删除
-        return file.delete();
-    }
 }

@@ -6,7 +6,6 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
-import com.surcumference.fingerprint.BuildConfig;
 import org.json.JSONObject;
 
 public final class ConfigProvider extends ContentProvider {

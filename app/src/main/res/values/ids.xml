@@ -12,11 +12,6 @@
     <item name="downloading" type="id"/>
     <item name="download_title_failed" type="id" />
     <item name="ok" type="id"/>
-    <item name="settings_title_taobao" type="id"/>
-    <item name="settings_title_alipay" type="id"/>
-    <item name="settings_title_wechat" type="id"/>
-    <item name="settings_title_qq" type="id"/>
-    <item name="settings_title_unionpay" type="id"/>
     <item name="fingerprint_verification" type="id"/>
     <item name="qq_payview_fingerprint_title" type="id"/>
     <item name="qq_payview_password_switch_text" type="id"/>

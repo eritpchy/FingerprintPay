@@ -9,7 +9,6 @@ import android.content.Context;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.*;
-import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
@@ -47,7 +46,6 @@ public class TaobaoBasePlugin implements IAppPlugin {
 
 
     private AlertDialog mFingerPrintAlertDialog;
-    private int mPwdActivityReShowDelayTimeMsec;
 
 
     private XBiometricIdentify mFingerprintIdentify;
@@ -64,7 +62,6 @@ public class TaobaoBasePlugin implements IAppPlugin {
     private boolean mFingerprintIdentifyTemporaryBlocking = false;
 
 
-    @Override
     public int getVersionCode(Context context) {
         if (mTaobaoVersionCode != 0) {
             return mTaobaoVersionCode;
@@ -242,14 +239,12 @@ public class TaobaoBasePlugin implements IAppPlugin {
             if (paymentTarget == null || !PaymentPasswordGuard.ready(config, paymentTarget) || !mPayment.begin(activity, paymentTarget, SystemClock.uptimeMillis())) return;
             final long token = mPayment.token();
             mPayment.restoreWith(token, this::releasePaymentObjects);
-            mPwdActivityReShowDelayTimeMsec = 0;
             reEnteredPayDialogSolution(activity);
             OnFingerprintVerificationOKListener onSuccess = password -> {
                 BlackListUtils.applyIfNeeded(context);
 
                 if (!mPayment.isActive(token)) return;
                 Runnable complete = () -> {
-                    mPwdActivityReShowDelayTimeMsec = 1000;
                     mPayment.finish(token, SystemClock.uptimeMillis());
                 };
                 try {

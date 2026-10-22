@@ -67,10 +67,6 @@ public final class Config {
     private void set(String key, Object value) {
         try {
             JSONObject valueNow = read(), values = new JSONObject().put(key, value);
-            if (Boolean.TRUE.equals(value)) {
-                if ("biometric_api".equals(key)) values.put("volume_down_monitor_enabled", false);
-                if ("volume_down_monitor_enabled".equals(key)) values.put("biometric_api", false);
-            }
             store.request(request("patch").put("revision", valueNow.getLong("revision")).put("values", values));
         }
         catch (Exception ignored) { Toaster.showShort("配置保存失败，请检查配置服务并重试"); }
@@ -82,15 +78,11 @@ public final class Config {
         catch (Exception ignored) { return false; }
     }
     public boolean isInScope() { return option("scope", true); }
-    public void setInScope(boolean value) { set("scope", value); }
-    public boolean isPaymentEnabled() { return option("switch_on1", false); }
-    public void setOn(boolean value) { set("switch_on1", value); }
     public String getPasswordEncrypted() {
         try { JSONObject settings = read().getJSONObject("settings");
             return settings.optBoolean("hasPassword") ? "tee-v2:" + settings.getLong("credentialVersion") : null; }
         catch (Exception ignored) { return null; }
     }
-    public String getPasswordIV() { return getPasswordEncrypted() == null ? null : "tee-v2"; }
     public void setPasswordEncrypted(String value) { if (value == null || value.isEmpty()) { try { savePassword(""); } catch (Exception ignored) { Toaster.showShort("密码清除失败"); } } }
     public String beginPassword(String value) throws Exception {
         JSONObject current = read();
@@ -121,18 +113,12 @@ public final class Config {
     }
 
     public boolean isShowFingerprintIcon() { return option("fingerprint_icon", false); }
-    public void setShowFingerprintIcon(boolean value) { set("fingerprint_icon", value); }
     public boolean isUnderDisplayFingerprint() { return !isShowFingerprintIcon(); }
-    public void setUnderDisplayFingerprint(boolean value) { setShowFingerprintIcon(!value); }
     public boolean isUseBiometricApi() { return option("biometric_api", false); }
-    public void setUseBiometricApi(boolean value) { set("biometric_api", value); }
     public boolean isVolumeDownMonitorEnabled() { return option("volume_down_monitor_enabled", true); }
-    public void setVolumeDownMonitorEnabled(boolean value) { set("volume_down_monitor_enabled", value); }
     private String skipKey() { return "skip_" + PluginApp.getCurrentType().name().toLowerCase(Locale.ROOT); }
     public void setSkipVersion(String value) { set(skipKey(), value); }
     public String getSkipVersion() { try { return read().getJSONObject("globals").optString(skipKey(), ""); } catch (Exception ignored) { return ""; } }
     public void setLicenseAgree(boolean value) { set("license_agree", value); }
-    public boolean getLicenseAgree() { return option("license_agree", false); }
     public boolean isAutoUpdate() { return option("auto_update", true); }
-    public void commit() {}
 }

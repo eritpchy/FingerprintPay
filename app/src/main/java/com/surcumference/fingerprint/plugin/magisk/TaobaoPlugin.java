@@ -7,7 +7,6 @@ import androidx.annotation.Keep;
 import com.hjq.toast.Toaster;
 import com.surcumference.fingerprint.BuildConfig;
 import com.surcumference.fingerprint.Constant;
-import com.surcumference.fingerprint.bean.PluginTarget;
 import com.surcumference.fingerprint.network.update.UpdateFactory;
 import com.surcumference.fingerprint.plugin.PluginApp;
 import com.surcumference.fingerprint.plugin.PluginFactory;
@@ -29,7 +28,7 @@ public class TaobaoPlugin {
     @Keep
     public static void main(String niceName, String pluginTypeName) {
         L.d("Xposed plugin init version: " + BuildConfig.VERSION_NAME);
-        PluginApp.setup(pluginTypeName, PluginTarget.Taobao);
+        PluginApp.setup(pluginTypeName);
         Task.onApplicationReady(TaobaoPlugin::init);
     }
 

@@ -5,7 +5,6 @@ import android.text.TextUtils;
 import com.google.gson.Gson;
 import com.surcumference.fingerprint.BuildConfig;
 import com.surcumference.fingerprint.bean.PluginType;
-import com.surcumference.fingerprint.plugin.PluginApp;
 import com.surcumference.fingerprint.Lang;
 import com.surcumference.fingerprint.R;
 import com.surcumference.fingerprint.bean.UpdateInfo;
@@ -20,7 +19,6 @@ import com.surcumference.fingerprint.network.update.github.bean.GithubAssetsInfo
 import com.surcumference.fingerprint.network.update.github.bean.GithubLatestInfo;
 import com.surcumference.fingerprint.util.DateUtils;
 import com.surcumference.fingerprint.util.StringUtils;
-import com.surcumference.fingerprint.util.log.L;
 
 import java.io.IOException;
 import java.util.Date;
@@ -40,10 +38,6 @@ public class GithubUpdateChecker extends BaseUpdateChecker {
     private final String[] mUpdateUrls;
     private final PluginType mPluginType;
     private final AtomicLong generation = new AtomicLong();
-
-    public GithubUpdateChecker(String localVersion, String[] updateUrls, UpdateResultListener listener) {
-        this(localVersion, updateUrls, PluginApp.getCurrentType(), listener);
-    }
 
     public GithubUpdateChecker(String localVersion, String[] updateUrls, PluginType type, UpdateResultListener listener) {
         super(listener);
@@ -82,7 +76,7 @@ public class GithubUpdateChecker extends BaseUpdateChecker {
                             GithubAssetsInfo asset = info.getDownloadAssetsInfo(mPluginType);
                             UpdateInfo update = new UpdateInfo(info.version,
                                     appendUpdateExtInfo(info.content, info.date, info.contentUrl),
-                                    info.contentUrl, asset.url, asset.name, asset.size);
+                                    asset.url, asset.name, asset.size);
                             update.digest = asset.digest;
                             onHasUpdate(update);
                         } else onNoUpdate();

@@ -10,6 +10,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.ContextThemeWrapper;
@@ -30,7 +31,6 @@ import com.surcumference.fingerprint.listener.OnShowListener;
 import com.surcumference.fingerprint.util.DpUtils;
 import com.surcumference.fingerprint.util.StyleUtils;
 import com.surcumference.fingerprint.util.Umeng;
-import com.surcumference.fingerprint.util.drawable.XDrawable;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -158,8 +158,17 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
 
     private void styleAction(TextView action) {
         action.setTextColor(StyleUtils.accentColor(getContext()));
-        action.setBackground(new XDrawable.Builder().pressedColor(StyleUtils.pressedColor(getContext()))
-                .round(DpUtils.dip2px(getContext(), 8)).create());
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[]{android.R.attr.state_pressed}, actionBackground(StyleUtils.pressedColor(getContext())));
+        background.addState(new int[]{}, actionBackground(Color.TRANSPARENT));
+        action.setBackground(background);
+    }
+
+    private Drawable actionBackground(int color) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setCornerRadius(DpUtils.dip2px(getContext(), 8));
+        shape.setColor(color);
+        return shape;
     }
 
     private TextView createTitleTextView() {
@@ -182,7 +191,7 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
         return titleTextView;
     }
 
-    private View createNeutralButton(AlertDialog dialog) {
+    private View createButton(AlertDialog dialog, String text, int which) {
         Context context = getContext();
         TextView textView = new TextView(context);
         mActionViews.add(textView);
@@ -190,85 +199,25 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_DEFAULT);
         textView.setMinWidth(DpUtils.dip2px(context, 45));
         textView.setGravity(Gravity.CENTER);
-
-        String text = mNeutralButtonText;
-        int defHPadding = DpUtils.dip2px(context, 6);
-        int defVPadding = DpUtils.dip2px(context, 10);
-        textView.setPadding(defHPadding, defVPadding, defHPadding, defVPadding);
+        int paddingH = DpUtils.dip2px(context, 6);
+        int paddingV = DpUtils.dip2px(context, 10);
+        textView.setPadding(paddingH, paddingV, paddingH, paddingV);
         if (TextUtils.isEmpty(text)) {
             textView.setVisibility(GONE);
         } else {
             textView.setText(text);
             textView.setOnClickListener(v -> {
-                DialogInterface.OnClickListener listener = mOnNeutralButtonClickListener;
-                if (listener != null) {
-                    listener.onClick(dialog, DialogInterface.BUTTON_NEUTRAL);
-                } else {
-                    dialog.dismiss();
-                }
+                DialogInterface.OnClickListener listener = which == DialogInterface.BUTTON_NEUTRAL
+                        ? mOnNeutralButtonClickListener : which == DialogInterface.BUTTON_POSITIVE
+                        ? mOnPositiveButtonClickListener : null;
+                if (listener != null) listener.onClick(dialog, which);
+                else dialog.dismiss();
             });
         }
-        LinearLayout btnCon = new LinearLayout(context);
-        btnCon.addView(textView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        btnCon.setGravity(Gravity.LEFT);
-        return btnCon;
-    }
-
-    private View createNegativeButton(AlertDialog dialog) {
-        Context context = getContext();
-        TextView textView = new TextView(context);
-        mActionViews.add(textView);
-        styleAction(textView);
-        textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_DEFAULT);
-        textView.setMinWidth(DpUtils.dip2px(context, 45));
-        textView.setGravity(Gravity.CENTER);
-
-        String text = mNegativeButtonText;
-        int defHPadding = DpUtils.dip2px(context, 6);
-        int defVPadding = DpUtils.dip2px(context, 10);
-        textView.setPadding(defHPadding, defVPadding, defHPadding, defVPadding);
-        if (TextUtils.isEmpty(text)) {
-            textView.setVisibility(GONE);
-        } else {
-            textView.setText(text);
-            textView.setOnClickListener(v -> dialog.dismiss());
-        }
-        LinearLayout btnCon = new LinearLayout(context);
-        btnCon.addView(textView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        btnCon.setGravity(Gravity.RIGHT);
-        return btnCon;
-    }
-
-    private View createPositiveButton(AlertDialog dialog) {
-        Context context = getContext();
-        TextView textView = new TextView(context);
-        mActionViews.add(textView);
-        styleAction(textView);
-        textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, StyleUtils.TEXT_SIZE_DEFAULT);
-        textView.setMinWidth(DpUtils.dip2px(context, 45));
-        textView.setGravity(Gravity.CENTER);
-
-        String text = mPositiveButtonText;
-        int defHPadding = DpUtils.dip2px(context, 6);
-        int defVPadding = DpUtils.dip2px(context, 10);
-        textView.setPadding(defHPadding, defVPadding, defHPadding, defVPadding);
-        if (TextUtils.isEmpty(text)) {
-            textView.setVisibility(GONE);
-        } else {
-            textView.setText(text);
-            textView.setOnClickListener(v -> {
-                DialogInterface.OnClickListener listener = mOnPositiveButtonClickListener;
-                if (listener != null) {
-                    listener.onClick(dialog, DialogInterface.BUTTON_POSITIVE);
-                } else {
-                    dialog.dismiss();
-                }
-            });
-        }
-        LinearLayout btnCon = new LinearLayout(context);
-        btnCon.addView(textView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        btnCon.setGravity(Gravity.RIGHT);
-        return btnCon;
+        LinearLayout container = new LinearLayout(context);
+        container.addView(textView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        container.setGravity(which == DialogInterface.BUTTON_NEUTRAL ? Gravity.LEFT : Gravity.RIGHT);
+        return container;
     }
 
     private View createBtnAreaView(AlertDialog dialog) {
@@ -277,9 +226,9 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
         btnLLayout.setOrientation(LinearLayout.HORIZONTAL);
         btnLLayout.setWeightSum(1);
 
-        View neutralButton = createNeutralButton(dialog);
-        View negativeButton = createNegativeButton(dialog);
-        View positiveButton = createPositiveButton(dialog);
+        View neutralButton = createButton(dialog, mNeutralButtonText, DialogInterface.BUTTON_NEUTRAL);
+        View negativeButton = createButton(dialog, mNegativeButtonText, DialogInterface.BUTTON_NEGATIVE);
+        View positiveButton = createButton(dialog, mPositiveButtonText, DialogInterface.BUTTON_POSITIVE);
 
         int defPadding = DpUtils.dip2px(context, 20);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 1);

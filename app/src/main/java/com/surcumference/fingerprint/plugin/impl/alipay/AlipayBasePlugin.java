@@ -1,6 +1,5 @@
 package com.surcumference.fingerprint.plugin.impl.alipay;
 
-import static com.surcumference.fingerprint.Constant.ICON_ALIPAY_SETTING_ENTRY_BASE64;
 import static com.surcumference.fingerprint.Constant.PACKAGE_NAME_ALIPAY;
 
 import android.app.Activity;
@@ -63,7 +62,6 @@ public class AlipayBasePlugin implements IAppPlugin {
     private String mPaymentMethod;
     private boolean mPasswordRejected;
 
-    @Override
     public int getVersionCode(Context context) {
         if (mAlipayVersionCode != 0) {
             return mAlipayVersionCode;
@@ -396,7 +394,7 @@ public class AlipayBasePlugin implements IAppPlugin {
         }
         try {
             EditText edit = findPasswordEditText(activity);
-            View confirm = edit == null ? null : findConfirmPasswordBtn(edit, false);
+            View confirm = edit == null ? null : findConfirmPasswordBtn(edit);
             if (edit != null && confirm != null) {
                 if (!edit.isEnabled()) {
                     if (SystemClock.uptimeMillis() >= deadline) inputFailed(token);
@@ -451,7 +449,7 @@ public class AlipayBasePlugin implements IAppPlugin {
             if (mPaymentSession.owns(token)) restorePassword(token);
             return;
         }
-        if (findPasswordEditText(activity) != edit || findConfirmPasswordBtn(edit, false) != confirm) {
+        if (findPasswordEditText(activity) != edit || findConfirmPasswordBtn(edit) != confirm) {
             restorePassword(token);
             return;
         }
@@ -542,16 +540,14 @@ public class AlipayBasePlugin implements IAppPlugin {
         return null;
     }
 
-    private View findConfirmPasswordBtn(EditText edit) { return findConfirmPasswordBtn(edit, true); }
-
-    private View findConfirmPasswordBtn(EditText edit, boolean requireEnabled) {
+    private View findConfirmPasswordBtn(EditText edit) {
         View root = edit.getRootView();
         for (android.view.ViewParent parent = edit.getParent(); parent instanceof ViewGroup && parent != root;
              parent = parent.getParent()) {
             ViewGroup form = (ViewGroup) parent;
             if (form.getId() == android.R.id.content) break;
             View idMatch = ViewUtils.findViewByName(form, "com.alipay.android.phone.mobilecommon.verifyidentity", "button_ok");
-            if (isConfirmButton(idMatch, form, requireEnabled)) return idMatch;
+            if (isConfirmButton(idMatch, form)) return idMatch;
             List<View> children = new ArrayList<>();
             ViewUtils.getChildViews(form, children);
             View match = null;
@@ -562,7 +558,7 @@ public class AlipayBasePlugin implements IAppPlugin {
                 while (!button.isClickable() && button.getParent() instanceof View && button.getParent() != form) {
                     button = (View) button.getParent();
                 }
-                if (!isConfirmButton(button, form, requireEnabled)) continue;
+                if (!isConfirmButton(button, form)) continue;
                 if (match != null && match != button) return null;
                 match = button;
             }
@@ -571,8 +567,8 @@ public class AlipayBasePlugin implements IAppPlugin {
         return null;
     }
 
-    private boolean isConfirmButton(View view, ViewGroup form, boolean requireEnabled) {
-        if (view == null || !view.isShown() || (requireEnabled && !view.isEnabled()) || !view.isClickable() || view.getAlpha() <= 0) return false;
+    private boolean isConfirmButton(View view, ViewGroup form) {
+        if (view == null || !view.isShown() || !view.isClickable() || view.getAlpha() <= 0) return false;
         for (View current = view; current != null; ) {
             if (current.getId() != View.NO_ID) {
                 try {

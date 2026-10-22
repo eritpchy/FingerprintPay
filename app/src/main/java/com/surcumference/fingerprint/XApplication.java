@@ -12,7 +12,7 @@ public class XApplication extends Application {
     @Override
     protected void attachBaseContext(Context base) {
         super.attachBaseContext(base);
-        PluginApp.setup(PluginType.Xposed, null);
+        PluginApp.setup(PluginType.Xposed);
     }
 
     @Override

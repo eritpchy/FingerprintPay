@@ -27,7 +27,6 @@ import java.io.File;
 /**
  * Created by Jason on 2021/8/28.
  */
-@androidx.annotation.Keep
 public class DownloadView extends DialogFrameLayout {
 
     private ProgressBar mProgressBar;

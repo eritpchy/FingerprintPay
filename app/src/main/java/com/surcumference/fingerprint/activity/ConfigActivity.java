@@ -1,7 +1,6 @@
 package com.surcumference.fingerprint.activity;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
 import android.content.ActivityNotFoundException;
 import android.content.res.Configuration;
