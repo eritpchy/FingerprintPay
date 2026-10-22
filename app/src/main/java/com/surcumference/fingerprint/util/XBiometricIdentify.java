@@ -29,6 +29,10 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
     private boolean allowPasswordCipherFallback = false;
     private java.util.concurrent.Callable<Cipher> cipherFactory;
     private CipherAction cipherAction;
+    private java.util.concurrent.Callable<String> softwareAction;
+    private boolean authenticationOnly;
+    private int operationMode;
+    private byte[] operationIV;
     private long identifyGeneration;
     private boolean identifyFinished = true;
     private IdentifyListener lastIdentifyListener;
@@ -56,6 +60,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
     }
 
     public T withEncryptionMode(String cipherContent, String cipherFallbackKey) {
+        withCipherAction(Cipher.ENCRYPT_MODE, null, null);
         this.cipherContent = cipherContent;
         this.cipherFallbackKey = cipherFallbackKey;
         fingerprintIdentify.setCipherMode(Cipher.ENCRYPT_MODE, null);
@@ -63,6 +68,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
     }
 
     public T withDecryptionMode(String cipherContent, byte[] cipherIV, String cipherFallbackKey) {
+        withCipherAction(Cipher.DECRYPT_MODE, null, null); operationIV = cipherIV;
         this.cipherContent = cipherContent;
         this.cipherFallbackKey = cipherFallbackKey;
         fingerprintIdentify.setCipherMode(Cipher.DECRYPT_MODE, cipherIV);
@@ -70,9 +76,23 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
     }
 
     public T withCipherAction(int mode, java.util.concurrent.Callable<Cipher> factory, CipherAction action) {
+        operationMode = mode; operationIV = null;
+        authenticationOnly = false; softwareAction = null;
         cipherFactory = factory;
         cipherAction = action;
         fingerprintIdentify.setCipherMode(mode, null);
+        return (T) this;
+    }
+
+    public T withEncryptionFallback(java.util.concurrent.Callable<String> action) {
+        if (operationMode != Cipher.ENCRYPT_MODE || cipherAction == null) throw new IllegalStateException("Encryption action required");
+        softwareAction = action;
+        return (T) this;
+    }
+
+    public T withAuthenticationAction(int mode, java.util.concurrent.Callable<String> action) {
+        withCipherAction(mode, null, null);
+        authenticationOnly = true; softwareAction = action;
         return (T) this;
     }
 
@@ -99,7 +119,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
         identifyFinished = false;
         lastIdentifyListener = identifyListener;
         manager.set(this);
-        final int cipherMode = fingerprintIdentify.getCipherMode();
+        final int cipherMode = operationMode;
         try {
             identifyStage = "availability";
             if (cipherMode != Cipher.ENCRYPT_MODE && cipherMode != Cipher.DECRYPT_MODE) {
@@ -116,7 +136,20 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
                 return (T) this;
             }
             identifyStage = "key";
-            final Cipher expectedCipher = cipherFactory == null ? null : cipherFactory.call();
+            Cipher preparedCipher = null;
+            if (!authenticationOnly && cipherFactory != null) {
+                try { preparedCipher = cipherFactory.call(); }
+                catch (Exception error) {
+                    if (cipherMode != Cipher.ENCRYPT_MODE || softwareAction == null) throw error;
+                    android.util.Log.w("FingerprintPay", "Using software password protection: " + error.getClass().getName());
+                    authenticationOnly = true;
+                }
+                if (preparedCipher == null && softwareAction != null && cipherMode == Cipher.ENCRYPT_MODE) authenticationOnly = true;
+            }
+            final Cipher expectedCipher = preparedCipher;
+            final boolean softwareOnly = authenticationOnly;
+            // The fingerprint library uses decrypt-without-IV for authentication without a CryptoObject.
+            fingerprintIdentify.setCipherMode(softwareOnly ? Cipher.DECRYPT_MODE : cipherMode, softwareOnly ? null : operationIV);
             fingerprintIdentify.setCipher(expectedCipher);
             fingerprintScanStateReady = true;
             identifyListener.onInited(this);
@@ -133,9 +166,13 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
                     String result;
                     try {
                         identifyStage = "cipher-action";
-                        if (cipherAction != null && (cipher == null || cipher != expectedCipher)) throw new SecurityException("Biometric cipher mismatch");
-                        result = cipherAction != null ? cipherAction.run(cipher) : encryptionOrDecryption(cipherMode, cipher, cipherContent);
-                        if (cipherAction == null && result == null && allowPasswordCipherFallback) {
+                        if (softwareOnly || cipher == null && softwareAction != null && cipherMode == Cipher.ENCRYPT_MODE) {
+                            result = softwareAction.call();
+                        } else {
+                            if (cipherAction != null && (cipher == null || cipher != expectedCipher)) throw new SecurityException("Biometric cipher mismatch");
+                            result = cipherAction != null ? cipherAction.run(cipher) : encryptionOrDecryption(cipherMode, cipher, cipherContent);
+                        }
+                        if (cipherAction == null && softwareAction == null && result == null && allowPasswordCipherFallback) {
                             cipher = PasswordCipherHelper.createCipher(cipherMode, cipherFallbackKey);
                             result = encryptionOrDecryption(cipherMode, cipher, cipherContent);
                         }
@@ -145,7 +182,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
                     } catch (Exception e) {
                         L.e("Biometric cipher operation failed", e);
                         fail(generation, identifyListener, new FingerprintIdentifyFailInfo(false, e),
-                                NotifyEnum.OnDecryptionFailed);
+                                cipherMode == Cipher.DECRYPT_MODE ? NotifyEnum.OnDecryptionFailed : null);
                         return;
                     }
                     if (!finish(generation)) {
@@ -153,7 +190,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
                     }
                     try {
                         if (cipherMode == Cipher.ENCRYPT_MODE) {
-                            identifyListener.onEncryptionSuccess(XBiometricIdentify.this, result, cipher.getIV());
+                            identifyListener.onEncryptionSuccess(XBiometricIdentify.this, result, cipher == null ? null : cipher.getIV());
                         } else {
                             identifyListener.onDecryptionSuccess(XBiometricIdentify.this, result);
                         }
@@ -176,6 +213,16 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
 
                 @Override
                 public void onFailed(FingerprintIdentifyFailInfo failInfo) {
+                    if (!isActive(generation)) return;
+                    if (!softwareOnly && softwareAction != null && cipherMode == Cipher.ENCRYPT_MODE
+                            && !failInfo.isCancel() && !failInfo.deviceLocked && isCryptoFailure(failInfo.throwable)) {
+                        ++identifyGeneration;
+                        fingerprintIdentify.cancelIdentify();
+                        manager.clear(XBiometricIdentify.this);
+                        authenticationOnly = true;
+                        startIdentify(identifyListener, true);
+                        return;
+                    }
                     fail(generation, identifyListener, failInfo,
                             failInfo.isCancel() ? null : failInfo.deviceLocked ? NotifyEnum.OnBiometricLocked
                                     : failInfo.errorCode == -2 ? NotifyEnum.OnBiometricRetryEnded
@@ -196,6 +243,13 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
     }
 
     public interface CipherAction { String run(Cipher authorized) throws Exception; }
+
+    private static boolean isCryptoFailure(Throwable error) {
+        for (int depth = 0; error != null && depth < 8; depth++, error = error.getCause()) {
+            if (error instanceof java.security.GeneralSecurityException || error instanceof java.security.ProviderException) return true;
+        }
+        return false;
+    }
 
     private boolean isActive(long generation) {
         return generation == identifyGeneration && !identifyFinished;
@@ -220,7 +274,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
             return;
         }
         android.util.Log.e("FingerprintPay", "Biometric failure stage=" + identifyStage
-                + " mode=" + fingerprintIdentify.getCipherMode() + " code=" + info.errorCode
+                + " mode=" + operationMode + " code=" + info.errorCode
                 + " locked=" + info.deviceLocked + " exception="
                 + (info.throwable == null ? "none" : info.throwable.getClass().getName()));
         try {

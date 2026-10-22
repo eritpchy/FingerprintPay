@@ -96,8 +96,11 @@ static void begin_password(const std::string& target, const std::string& passwor
 }
 static void validate_record(const json& record, int user, const std::string& pkg, const std::string& id) {
     auto iv = unhex(record.at("iv")), data = unhex(record.at("data"));
-    if (record.at("format") != "tee-aes-gcm-v2" || record.at("keyAlias") != "fingerprintpay.tee.v2.Zygisk." + std::to_string(user) + "." + pkg + "." + id
-            || iv.size() != 12 || data.size() < 17 || data.size() > 1040) throw std::runtime_error("Invalid TEE password record");
+    std::string prefix = record.at("format") == "tee-aes-gcm-v2" ? "fingerprintpay.tee.v2.Zygisk."
+            : record.at("format") == "software-aes-gcm-v1" ? "fingerprintpay.software.v1.Zygisk." : "";
+    if (prefix.empty() || id.size() != 32 || id.find_first_not_of("0123456789abcdef") != std::string::npos
+            || record.at("keyAlias") != prefix + std::to_string(user) + "." + pkg + "." + id
+            || iv.size() != 12 || data.size() < 17 || data.size() > 1040) throw std::runtime_error("Invalid password record");
 }
 static json defaults() { return {{"scope", true}, {"switch_on1", false}, {"fingerprint_icon", false}, {"biometric_api", false}, {"volume_down_monitor_enabled", true}, {"credentialVersion", 0}, {"hasPassword", false}, {"migrated", false}}; }
 static bool belongs(uid_t uid, const std::string& pkg) {

@@ -118,7 +118,7 @@ public final class LocalConfigStore implements ConfigStore {
                     pending.validate(pkg, id, version);
                     if (!settings.optBoolean("scope")) throw new IllegalStateException("Application disabled");
                     JSONObject record = request.getJSONObject("record");
-                    ConfigContract.validateTeeRecord(record, "Xposed", android.os.Process.myUid() / 100000, pkg, id);
+                    ConfigContract.validatePasswordRecord(record, "Xposed", android.os.Process.myUid() / 100000, pkg, id);
                     settings.put("secret", record).put("hasPassword", true).put("requiresReentry", false).put("credentialVersion", version + 1);
                     settings.remove("legacySecret");
                 } else throw new IllegalArgumentException("Unknown operation");

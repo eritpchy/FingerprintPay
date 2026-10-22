@@ -104,9 +104,14 @@ public final class PasswordEnrollment implements Application.ActivityLifecycleCa
             @Override public void onEncryptionSuccess(BizBiometricIdentify target, String encrypted, byte[] iv) {
                 if (authentication != identify || dialog != confirmation) return;
                 view.saved();
-                android.widget.Toast.makeText(activity, "此应用的支付密码已保存", android.widget.Toast.LENGTH_SHORT).show();
                 confirmation.dismiss();
-                returnToSettings(activity);
+                boolean returned = returnToSettings(activity);
+                boolean hardwareProtected = target.isEnrollmentHardwareProtected();
+                String message = hardwareProtected ? "此应用的支付密码已保存"
+                        : "由于 TEE 指纹保护未能启用，密码已使用软件保护保存";
+                if (!returned) message += "。请返回指纹支付继续录入";
+                android.widget.Toast.makeText(activity, message, hardwareProtected && returned
+                        ? android.widget.Toast.LENGTH_SHORT : android.widget.Toast.LENGTH_LONG).show();
             }
             @Override public void onFailed(BizBiometricIdentify target, FingerprintIdentifyFailInfo info) {
                 if (authentication != identify || dialog != confirmation) return;
@@ -115,21 +120,20 @@ public final class PasswordEnrollment implements Application.ActivityLifecycleCa
             }
         });
     }
-    static void returnToSettings(Activity activity) {
+    static boolean returnToSettings(Activity activity) {
         boolean returned = false;
         try { returned = activity.moveTaskToBack(true); }
         catch (Exception error) { android.util.Log.w("FingerprintPay", "Password enrollment task return failed", error); }
         android.util.Log.i("FingerprintPay", "Password enrollment return: " + activity.getPackageName()
                 + " task=" + activity.getTaskId() + " moved=" + returned);
-        if (!returned) android.widget.Toast.makeText(activity,
-                "密码已保存，请返回指纹支付继续录入", android.widget.Toast.LENGTH_LONG).show();
+        return returned;
     }
     static String failureMessage(FingerprintIdentifyFailInfo info) {
         if (info.isCancel()) return "已取消指纹验证，未保存密码";
         if (info.deviceLocked) return "指纹已锁定，请解锁手机后重新设置密码";
         if (info.errorCode == -1) return "指纹不可用，请先在系统设置中录入指纹";
-        if (info.throwable instanceof SecurityException && "Hardware biometric TEE protection unavailable".equals(info.throwable.getMessage()))
-            return "未保存密码：系统未提供硬件 TEE 指纹保护";
+        if (info.throwable instanceof SecurityException && "Biometric key protection unavailable".equals(info.throwable.getMessage()))
+            return "未保存密码：系统密钥不支持逐次指纹授权";
         if (info.throwable instanceof android.security.keystore.KeyPermanentlyInvalidatedException)
             return "指纹密钥已失效，请重新设置密码";
         return "指纹验证或密码保存失败，请重试";

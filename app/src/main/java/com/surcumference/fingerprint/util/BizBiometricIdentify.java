@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Process;
 import com.surcumference.fingerprint.storage.ConfigContract;
 import com.surcumference.fingerprint.storage.TeePasswordCipher;
+import com.surcumference.fingerprint.storage.SoftwarePasswordCipher;
 import com.surcumference.fingerprint.plugin.PluginApp;
 import javax.crypto.Cipher;
 import org.json.JSONObject;
@@ -28,8 +29,9 @@ public class BizBiometricIdentify extends XBiometricIdentify<BizBiometricIdentif
     }
 
     private Config enrollmentConfig;
-    private String enrollmentId, enrollmentAlias;
+    private String enrollmentId, enrollmentAlias, enrollmentSoftwareAlias;
     private boolean enrollmentCompleted;
+    private boolean enrollmentHardwareProtected;
     private boolean passwordFailureNotified;
     private String backend() {
         return PluginApp.getCurrentType().name();
@@ -48,15 +50,19 @@ public class BizBiometricIdentify extends XBiometricIdentify<BizBiometricIdentif
         try {
             Config config = Config.from(context);
             JSONObject record = config.passwordRecord(token);
-            withCipherAction(Cipher.DECRYPT_MODE,
-                    () -> TeePasswordCipher.decryption(record, backend(), Process.myUid() / 100000, context.getPackageName()),
-                    cipher -> {
-                        config.checkCredential(token);
-                        String password = TeePasswordCipher.decrypt(cipher, record);
-                        if (password.isEmpty()) throw new IllegalArgumentException("Empty payment password");
-                        config.checkCredential(token);
-                        return password;
-                    });
+            boolean software = ConfigContract.SOFTWARE_FORMAT.equals(record.optString("format"));
+            CipherAction decrypt = cipher -> {
+                config.checkCredential(token);
+                String password = software
+                        ? new SoftwarePasswordCipher(context).decrypt(record, backend(), Process.myUid() / 100000, context.getPackageName())
+                        : TeePasswordCipher.decrypt(cipher, record);
+                if (password.isEmpty()) throw new IllegalArgumentException("Empty payment password");
+                config.checkCredential(token);
+                return password;
+            };
+            if (software) withAuthenticationAction(Cipher.DECRYPT_MODE, () -> decrypt.run(null));
+            else withCipherAction(Cipher.DECRYPT_MODE,
+                    () -> TeePasswordCipher.decryption(record, backend(), Process.myUid() / 100000, context.getPackageName()), decrypt);
             startIdentify(paymentListener);
         } catch (Exception error) { paymentListener.onFailed(this, new FingerprintIdentifyFailInfo(false, error)); }
         return this;
@@ -74,15 +80,13 @@ public class BizBiometricIdentify extends XBiometricIdentify<BizBiometricIdentif
     public BizBiometricIdentify encryptPending(String id, IdentifyListener listener) {
         if (android.os.Build.VERSION.SDK_INT >= 28) withUseBiometricApi(true);
         enrollmentConfig = Config.from(context); enrollmentId = id;
+        enrollmentCompleted = false; enrollmentHardwareProtected = false;
         enrollmentAlias = ConfigContract.teeAlias(backend(), Process.myUid() / 100000, context.getPackageName(), id);
+        enrollmentSoftwareAlias = ConfigContract.softwareAlias(backend(), Process.myUid() / 100000, context.getPackageName(), id);
         withCipherAction(Cipher.ENCRYPT_MODE,
-                () -> TeePasswordCipher.encryption(enrollmentAlias),
-                cipher -> {
-                    String password = enrollmentConfig.claimPassword(id);
-                    JSONObject record = TeePasswordCipher.encrypt(cipher, enrollmentAlias, password);
-                    enrollmentConfig.commitPassword(id, record); enrollmentCompleted = true;
-                    return "saved";
-                });
+                () -> TeePasswordCipher.encryption(enrollmentAlias, hardware -> enrollmentHardwareProtected = hardware),
+                this::saveEnrollment);
+        withEncryptionFallback(() -> saveEnrollment(null));
         startIdentify(new IdentifyListener(listener) {
             @Override public void onFailed(BizBiometricIdentify identify, FingerprintIdentifyFailInfo info) {
                 abortEnrollment(); super.onFailed(identify, info);
@@ -90,10 +94,29 @@ public class BizBiometricIdentify extends XBiometricIdentify<BizBiometricIdentif
         });
         return this;
     }
+    private String saveEnrollment(Cipher cipher) throws Exception {
+        String password = enrollmentConfig.claimPassword(enrollmentId);
+        JSONObject record = null;
+        if (cipher != null) {
+            try { record = TeePasswordCipher.encrypt(cipher, enrollmentAlias, password); }
+            catch (java.security.GeneralSecurityException | java.security.ProviderException | IllegalStateException error) {
+                android.util.Log.w("FingerprintPay", "Using software password protection after encryption failure: " + error.getClass().getName());
+            }
+        }
+        if (record == null) {
+            enrollmentHardwareProtected = false;
+            record = new SoftwarePasswordCipher(context).encrypt(enrollmentSoftwareAlias, password);
+            TeePasswordCipher.discard(enrollmentAlias);
+        }
+        enrollmentConfig.commitPassword(enrollmentId, record); enrollmentCompleted = true;
+        return "saved";
+    }
+    public boolean isEnrollmentHardwareProtected() { return enrollmentHardwareProtected; }
     private void abortEnrollment() {
         if (!enrollmentCompleted && enrollmentId != null) {
             enrollmentConfig.cancelPassword(enrollmentId);
             TeePasswordCipher.discard(enrollmentAlias);
+            new SoftwarePasswordCipher(context).discard(enrollmentSoftwareAlias);
         }
     }
     @Override public void cancelIdentify() { super.cancelIdentify(); abortEnrollment(); }

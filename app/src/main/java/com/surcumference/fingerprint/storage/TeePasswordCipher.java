@@ -16,14 +16,16 @@ import org.json.JSONObject;
 
 @androidx.annotation.Keep
 public final class TeePasswordCipher {
-    public static Cipher encryption(String alias) throws Exception { return cipher(alias, null); }
+    public interface ProtectionListener { void onProtection(boolean hardwareProtected); }
+    public static Cipher encryption(String alias) throws Exception { return encryption(alias, null); }
+    public static Cipher encryption(String alias, ProtectionListener listener) throws Exception { return cipher(alias, null, listener); }
     public static Cipher decryption(JSONObject record, String backend, int user, String pkg) throws Exception {
         String alias = record.getString("keyAlias"), prefix = ConfigContract.teeAlias(backend, user, pkg, "");
         if (!alias.startsWith(prefix)) throw new SecurityException("Wrong password key owner");
         ConfigContract.validateTeeRecord(record, backend, user, pkg, alias.substring(prefix.length()));
-        return cipher(alias, record.getString("iv"));
+        return cipher(alias, record.getString("iv"), null);
     }
-    private static Cipher cipher(String alias, String iv) throws Exception {
+    private static Cipher cipher(String alias, String iv, ProtectionListener listener) throws Exception {
         KeyStore store = KeyStore.getInstance("AndroidKeyStore"); store.load(null);
         if (!store.containsAlias(alias)) {
             if (iv != null) throw new IllegalStateException("TEE key unavailable; set the password again");
@@ -38,17 +40,24 @@ public final class TeePasswordCipher {
         }
         SecretKey key = (SecretKey) store.getKey(alias, null);
         KeyInfo info = (KeyInfo) SecretKeyFactory.getInstance("AES", "AndroidKeyStore").getKeySpec(key, KeyInfo.class);
-        android.util.Log.i("FingerprintPay", "TEE key protection hardware=" + info.isInsideSecureHardware()
+        android.util.Log.i("FingerprintPay", "Keystore key protection hardware=" + info.isInsideSecureHardware()
                 + " authRequired=" + info.isUserAuthenticationRequired()
                 + " authHardware=" + info.isUserAuthenticationRequirementEnforcedBySecureHardware()
                 + " validity=" + info.getUserAuthenticationValidityDurationSeconds()
                 + " authType=" + (Build.VERSION.SDK_INT >= 30 ? info.getUserAuthenticationType() : -1)
                 + " enrollmentInvalidation=" + (Build.VERSION.SDK_INT >= 24 && info.isInvalidatedByBiometricEnrollment()));
-        if (!info.isInsideSecureHardware() || !info.isUserAuthenticationRequired() || !info.isUserAuthenticationRequirementEnforcedBySecureHardware()
+        // Software-backed Keystore keys still require the authenticated CryptoObject for each use.
+        if (!info.isUserAuthenticationRequired()
                 || info.getUserAuthenticationValidityDurationSeconds() > 0
                 || (Build.VERSION.SDK_INT >= 30 && info.getUserAuthenticationType() != KeyProperties.AUTH_BIOMETRIC_STRONG)
                 || (Build.VERSION.SDK_INT >= 24 && !info.isInvalidatedByBiometricEnrollment()))
-            throw new SecurityException("Hardware biometric TEE protection unavailable");
+            throw new SecurityException("Biometric key protection unavailable");
+        Cipher cipher = cipher(key, iv);
+        if (listener != null) listener.onProtection(info.isInsideSecureHardware()
+                && info.isUserAuthenticationRequirementEnforcedBySecureHardware());
+        return cipher;
+    }
+    static Cipher cipher(SecretKey key, String iv) throws Exception {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         if (iv == null) cipher.init(Cipher.ENCRYPT_MODE, key);
         else cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, unhex(iv)));
