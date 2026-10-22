@@ -6,7 +6,6 @@ import android.app.Activity;
 import com.surcumference.fingerprint.util.PaymentPasswordGuard;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -66,14 +65,8 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
     private final Handler mInputHandler = new Handler(Looper.getMainLooper());
     private Runnable mRestorePassword;
     private ViewGroup mPaymentRoot;
-    private View mKeyboardListenerRoot;
     private AlertDialog mPaymentDialog;
     private PaymentMethodWatch mPaymentMethodWatch;
-
-    // LiteApp payment activity support (WeChat 8.0.65+)
-    private ViewTreeObserver.OnGlobalLayoutListener mKeyboardLayoutListener;
-    private Activity mLiteAppActivity;
-    private boolean mLiteAppFirstDetection;
 
     public int getVersionCode(Context context) {
         if (mWeChatVersionCode != 0) {
@@ -157,54 +150,34 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         L.d("Activity onResume =", activity);
         final String activityClzName = activity.getClass().getName();
         if (isLiteAppPaymentActivity(activityClzName)) {
-            try {
-                mLiteAppActivity = activity;
-                mLiteAppFirstDetection = true;
-                final ViewGroup decorView = (ViewGroup) activity.getWindow().getDecorView();
-                removeKeyboardLayoutListener();
-                final View initialKey = ViewUtils.findViewByName(decorView, activity.getPackageName(), "tenpay_keyboard_0");
-                final boolean[] wasVisible = new boolean[]{initialKey != null && ViewUtils.isShownInScreen(initialKey)};
-                mKeyboardLayoutListener = () -> {
-                    try {
-                        Activity currentActivity = mLiteAppActivity;
-                        if (currentActivity == null || currentActivity != activity) {
+            ViewGroup decorView = (ViewGroup) activity.getWindow().getDecorView();
+            ActivityViewObserver observer = new ActivityViewObserver(activity);
+            observer.setWatchActivityViewOnly(true);
+            observer.setActivityViewFinder(views -> {
+                int id = decorView.getResources().getIdentifier("tenpay_keyboard_0", "id", activity.getPackageName());
+                if (id == 0) return;
+                List<View> keys = new ArrayList<>();
+                ViewUtils.getChildViews(decorView, id, keys);
+                for (View key : keys) {
+                    if (isPaymentViewVisible(key) && ViewUtils.isShownInScreen(key)) views.add(key);
+                }
+            });
+            ActivityViewObserverHolder.start(ActivityViewObserverHolder.Key.WeChatPayView, observer, 100,
+                    (current, key) -> {
+                        if (observerGeneration != mObserverGeneration || mObservedActivity != activity
+                                || !ActivityContext.isAlive(activity)) {
+                            ActivityViewObserverHolder.stop(current);
                             return;
                         }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                            if (activity.isDestroyed()) {
-                                return;
-                            }
+                        // A finished session still owns its target, so cancellation cannot restart authentication.
+                        if (mPaymentSession.owner() != activity || mPaymentSession.target() != key) {
+                            onPayDialogShownByKeyboard(activity, decorView, key);
                         }
-                        final View keyboardKey = ViewUtils.findViewByName(decorView, activity.getPackageName(), "tenpay_keyboard_0");
-                        boolean keyboardVisible = keyboardKey != null && ViewUtils.isShownInScreen(keyboardKey);
-                        if (keyboardVisible && !wasVisible[0]) {
-                            if (mLiteAppFirstDetection) {
-                                L.d("onViewFounded(LiteApp): ", ViewUtils.getViewInfo(keyboardKey), " rootView: ", keyboardKey.getRootView());
-                                mLiteAppFirstDetection = false;
-                            }
-                            Task.onMain(() -> {
-                                if (observerGeneration == mObserverGeneration && mObservedActivity == activity
-                                        && ActivityContext.isAlive(activity)) onPayDialogShownByKeyboard(activity, decorView, keyboardKey);
-                            });
-                        } else if (!keyboardVisible && wasVisible[0]) {
-                            if (keyboardKey == null || keyboardKey.getWindowToken() == null) {
-                                closePayment();
-                            }
+                        if (mPaymentSession.owner() == activity && mPaymentSession.target() == key) {
+                            L.d("onViewFounded(LiteApp):", key, " rootView:", decorView);
+                            ActivityViewObserverHolder.stop(current);
                         }
-                        wasVisible[0] = keyboardVisible;
-                    } catch (Exception e) {
-                        L.e(e);
-                        restorePassword();
-                    }
-                };
-                mKeyboardListenerRoot = decorView;
-                decorView.getViewTreeObserver().addOnGlobalLayoutListener(mKeyboardLayoutListener);
-                if (wasVisible[0]) {
-                    initialKey.post(() -> onPayDialogShownByKeyboard(activity, decorView, initialKey));
-                }
-            } catch (Exception e) {
-                L.e(e);
-            }
+                    });
         } else if (activityClzName.contains(".WalletPayUI")
                 || activityClzName.contains(".UIPageFragmentActivity")) {
             ActivityViewObserver activityViewObserver = new ActivityViewObserver(activity);
@@ -291,7 +264,6 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
     public void onActivityStopped(@NonNull Activity activity) {
         boolean inlineOwner = mPaymentMethodWatch != null && mPaymentMethodWatch.activity == activity;
         clearObservation(activity);
-        if (mLiteAppActivity == activity) removeKeyboardLayoutListener();
         if (mPaymentSession.owner() == activity || inlineOwner) {
             closePayment();
         }
@@ -305,10 +277,6 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
     @Override
     public void onActivityDestroyed(@NonNull Activity activity) {
         onActivityStopped(activity);
-        if (mLiteAppActivity == activity) {
-            removeKeyboardLayoutListener();
-            mLiteAppActivity = null;
-        }
     }
 
     @Override
@@ -660,7 +628,6 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         Activity activity = ActivityContext.find(context);
         if (activity != null && isSystemAuthenticationShowing(activity)) return;
         closePayment();
-        removeKeyboardLayoutListener();
     }
 
     protected void onPayDialogDismiss(Context context, View rootView) {
@@ -674,18 +641,6 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
 
     private static boolean isLiteAppPaymentActivity(String name) {
         return name.contains(".WxaLiteAppTransparentLiteUI") || name.contains(".WxaLiteAppPayTransparentLiteUI");
-    }
-
-    private void removeKeyboardLayoutListener() {
-        if (mKeyboardListenerRoot != null && mKeyboardLayoutListener != null) {
-            ViewTreeObserver observer = mKeyboardListenerRoot.getViewTreeObserver();
-            if (observer.isAlive()) {
-                if (Build.VERSION.SDK_INT >= 16) observer.removeOnGlobalLayoutListener(mKeyboardLayoutListener);
-                else observer.removeGlobalOnLayoutListener(mKeyboardLayoutListener);
-            }
-        }
-        mKeyboardLayoutListener = null;
-        mKeyboardListenerRoot = null;
     }
 
     private void clearObservation(Activity activity) {
@@ -707,6 +662,8 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
     }
 
     private void watchPaymentTarget(View target, long token) {
+        Activity activity = (Activity) mPaymentSession.owner();
+        long generation = mObserverGeneration;
         View.OnAttachStateChangeListener previous = mView2OnAttachStateChangeListenerMap.remove(target);
         if (previous != null) target.removeOnAttachStateChangeListener(previous);
         View.OnAttachStateChangeListener listener = new View.OnAttachStateChangeListener() {
@@ -714,10 +671,11 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
             @Override public void onViewDetachedFromWindow(View view) {
                 view.removeOnAttachStateChangeListener(this);
                 mView2OnAttachStateChangeListenerMap.remove(view);
-                if (!mPaymentSession.owns(token)) return;
-                Activity activity = (Activity) mPaymentSession.owner();
-                long generation = mObserverGeneration;
-                closePayment();
+                if (mPaymentSession.owns(token)) {
+                    closePayment();
+                } else if (mPaymentSession.owner() != null || mPaymentSession.token() != token + 1) {
+                    return;
+                }
                 if (mObserverRestart != null) mObserverRestart.cancel();
                 mObserverRestart = Task.onMain(500, () -> {
                     if (generation == mObserverGeneration && mObservedActivity == activity
