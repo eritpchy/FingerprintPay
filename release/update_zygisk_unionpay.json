@@ -1,6 +1,6 @@
 {
-    "version": "7.0.1",
-    "versionCode": "63",
-    "zipUrl": "https://file.xdow.net/d/download/fingerprintpay/7.0.1/zygisk-module-xfingerprint-pay-all-v7.0.1-release.zip",
+    "version": "7.0.2",
+    "versionCode": "64",
+    "zipUrl": "https://file.xdow.net/d/download/fingerprintpay/7.0.2/zygisk-module-xfingerprint-pay-all-v7.0.2-release.zip",
     "changelog": "https://gitee.com/eritpchy/FingerprintPay/raw/main/CHANGELOG.md"
 }

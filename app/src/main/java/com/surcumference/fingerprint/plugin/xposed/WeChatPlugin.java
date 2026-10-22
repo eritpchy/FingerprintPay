@@ -1,7 +1,5 @@
 package com.surcumference.fingerprint.plugin.xposed;
 
-import android.annotation.TargetApi;
-import android.app.Activity;
 import android.app.Application;
 import android.os.UserHandle;
 
@@ -51,31 +49,7 @@ public class WeChatPlugin {
                     }
                 });
             }
-            XposedHelpers.findAndHookMethod(Activity.class, "onResume", new XC_MethodHook() {
-                @TargetApi(21)
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    plugin.onActivityResumed((Activity) param.thisObject);
-                }
-            });
-
-            XposedHelpers.findAndHookMethod(Activity.class, "onPause", new XC_MethodHook() {
-                @TargetApi(21)
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    plugin.onActivityPaused((Activity) param.thisObject);
-                }
-            });
-            XposedHelpers.findAndHookMethod(Activity.class, "onStop", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    plugin.onActivityStopped((Activity) param.thisObject);
-                }
-            });
-            XposedHelpers.findAndHookMethod(Activity.class, "onDestroy", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    plugin.onActivityDestroyed((Activity) param.thisObject);
-                }
-            });
+            com.surcumference.fingerprint.xposed.XposedAppLifecycle.install(plugin);
             com.surcumference.fingerprint.storage.XposedRuntime.install(application, true);
         } catch (Throwable l) {
             try { com.surcumference.fingerprint.storage.XposedRuntime.install(application, false); } catch (Throwable ignored) {}
