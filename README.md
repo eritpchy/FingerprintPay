@@ -23,13 +23,13 @@
 
 ## 使用教程
 
-### Magisk + Zygisk
+### Magisk + Zygisk + WebUI
 
 1. 确认 Magisk Manager 应用设置中启用 Zygisk功能
 2. 下载插件: [zygisk-module-xfingerprint-pay-all-release.zip](https://github.com/eritpchy/FingerprintPay/releases)
 3. 进入 Magisk Manager 的模块页面安装五合一 ZIP，安装后在 WebUI 调整作用域。
 4. 确认启用模块, 重启手机
-5. 录入支付密码后开始使用。
+5. [WebUI-X-Portable](https://github.com/MMRLApp/WebUI-X-Portable) 或[KsuWebUI](https://github.com/KOWX712/KsuWebUIStandalone/releases) 进入模块设置页录入密码后开始使用。
 
 ### APatch + Zygisk Next
 
@@ -37,15 +37,14 @@
 2. 下载插件: [zygisk-module-xfingerprint-pay-all-release.zip](https://github.com/eritpchy/FingerprintPay/releases)
 3. 进入 Apatch 管理器, 模块, 安装这几个模块, 没装完不要重启, 安装完毕后再重启手机
 4. 开机后确认模块工作是否正常, 若不正常再次重启手机
-5. 录入支付密码后开始使用。
+5. 进入模块设置页录入支付密码后开始使用。
 
 ### Xposed
 
 1. 下载并安装插件: [xposed.com.surcumference.fingerprintpay.release.apk](https://github.com/eritpchy/FingerprintPay/releases/latest)
 2. 在Xposed管理器启用插件, 确保作用域正确
 3. 重启手机
-4. 找到指纹支付app录入密码开始使用
-5. 录入支付密码后开始使用。
+4. 找到指纹支付app录入支付密码后开始使用。
 
 ## 常见问题
 
