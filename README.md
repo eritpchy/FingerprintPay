@@ -50,6 +50,8 @@
 
 1. 为什么在微信或支付宝内看不到指纹支付设置菜单？\
    7.0.0 起不再提供应用内设置菜单，请在 Root 管理器中打开模块 WebUI，或打开“指纹支付”应用进行配置。
+2. Magisk 没有 WebUI 入口怎么办？\
+   可安装 [KsuWebUI](https://github.com/KOWX712/KsuWebUIStandalone/releases)（Android 8.0+），授予 Root 权限后选择“Zygisk - 指纹支付”进行配置。
 
 ## 致谢
 * [Magisk](https://github.com/topjohnwu/Magisk)
