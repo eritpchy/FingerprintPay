@@ -53,14 +53,14 @@
       "bytes": 1342
     },
     "index.html": {
-      "sourceSha256": "d302851e8955d7a77fcf9f4ff60b9de8b60f25bdd3eebb5abeba877ba217e546",
-      "sha256": "91fbd7035dc26efce4fb1d029ef7b4538ca6edc3c7f12ca7f67f60c9318e4f68",
-      "bytes": 15768
+      "sourceSha256": "8da194d0e40284e79737ec1bb810da519cf2086b23f435b885fcc8c877abaec1",
+      "sha256": "944f3a8a8143f4822dc6cd793971017c3d1c3d3d6ed5b8e3fc69c71e97839ac3",
+      "bytes": 15759
     },
     "module-update.js": {
-      "sourceSha256": "92c14eb247082c586c58bfc506f69ee01ad6fda88eea1a349e5564a1f9a50ef2",
-      "sha256": "9d6f3e015bb736864a6acaff259fe23c8461e70ac3f46d326f0c15587ba605da",
-      "bytes": 3629
+      "sourceSha256": "955de2b6aa477ec18e4c50ad64d387de1e6ed3f9cde559d34bf0296a1ae1e33d",
+      "sha256": "9af333b0ea10a7c92ab0a4e7d3f36c4bd3081e48ecca363c16d8839f074d94a7",
+      "bytes": 3575
     },
     "sodium.js": {
       "sourceSha256": "1419e10cb7765aed5e8c924ff48137753df2d80e24c8e49415c95aaa13b99561",
