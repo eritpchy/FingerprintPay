@@ -1,5 +1,6 @@
 #include "config_socket.h"
 #include "json.hpp"
+#include "runtime_status.h"
 #include <sodium.h>
 #include <sys/file.h>
 #include <poll.h>
@@ -252,6 +253,10 @@ int main(int argc, char** argv) {
     if (getuid() != 0) { std::cerr << "FP_CONFIG_ERROR:ROOT_REQUIRED" << std::endl; return 1; }
     if (sodium_init() < 0) return 1;
     try {
+        if (argc == 2 && std::string(argv[1]) == "rezygisk-status") {
+            std::cout << fp::rezygisk_status(read_file("/data/adb/rezygisk/state.json")) << std::endl;
+            return 0;
+        }
         if (argc == 3 && std::string(argv[1]) == "request") {
             std::string encoded(argv[2]); if (encoded.size() > 90000) return 1;
             std::vector<unsigned char> bytes(encoded.size()); size_t length;
