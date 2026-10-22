@@ -73,6 +73,8 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
     private View mKeyboardListenerRoot;
     private AlertDialog mPaymentDialog;
     private PaymentMethodWatch mPaymentMethodWatch;
+    /** 已注入过右上角菜单的设置页，防止 onResume 重复添加菜单项。 */
+    private final WeakHashMap<Activity, Boolean> mSettingsMenuInjected = new WeakHashMap<>();
 
     // LiteApp payment activity support (WeChat 8.0.65+)
     private ViewTreeObserver.OnGlobalLayoutListener mKeyboardLayoutListener;
@@ -343,6 +345,10 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
 
     /** 8.0.66+ 设置页：通过 addTextOptionMenu 在右上角菜单加一项。 */
     private void injectSettingsOptionMenu(Activity activity) {
+        // 菜单项不在 View 树里，hasEntry() 查不到，需单独记已注入的 Activity
+        if (mSettingsMenuInjected.containsKey(activity)) {
+            return;
+        }
         try {
             Method addTextOptionMenu = activity.getClass().getMethod(
                     "addTextOptionMenu", int.class, String.class, MenuItem.OnMenuItemClickListener.class);
@@ -353,6 +359,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                         SettingEntry.open(activity);
                         return true;
                     });
+            mSettingsMenuInjected.put(activity, Boolean.TRUE);
             L.d("WeChat settings option menu injected");
         } catch (Exception e) {
             // 反射失败时退化为：往设置页顶部插一个条目
