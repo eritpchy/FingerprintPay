@@ -7,7 +7,6 @@ import android.content.res.Resources;
 import android.graphics.Rect;
 import android.os.SystemClock;
 import android.text.TextUtils;
-import android.util.DisplayMetrics;
 import android.view.*;
 import android.widget.CheckBox;
 import android.widget.CheckedTextView;
@@ -415,16 +414,19 @@ public class ViewUtils {
         return true;
     }
 
-    public static boolean isShownInScreen(View v) {
-        Rect r = new Rect();
-        if (false == v.getGlobalVisibleRect(r)) {
-            return false;
+    public static boolean isShownInScreen(@Nullable View view) {
+        if (view == null || view.getWindowToken() == null || !view.isShown()
+                || view.getWindowVisibility() != View.VISIBLE) return false;
+        for (View current = view; current != null;
+                current = current.getParent() instanceof View ? (View) current.getParent() : null) {
+            if (current.getAlpha() <= 0) return false;
         }
-        if (r.left == 0 && r.right == 0 && r.top == 0 && r.bottom == 0) {
-            return false;
-        }
-        DisplayMetrics metrics = Resources.getSystem().getDisplayMetrics();
-        return Rect.intersects(r, new Rect(0, 0, metrics.widthPixels, metrics.heightPixels));
+        Rect visible = new Rect();
+        Rect window = new Rect();
+        // Both rectangles use the owning root's coordinates, including resized and floating windows.
+        return view.getGlobalVisibleRect(visible) && !visible.isEmpty()
+                && view.getRootView().getGlobalVisibleRect(window) && !window.isEmpty()
+                && Rect.intersects(visible, window);
     }
 
     public static boolean isViewVisibleInScreen(View view) {

@@ -155,9 +155,11 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
             observer.setWatchActivityViewOnly(true);
             observer.setActivityViewFinder(views -> {
                 int id = decorView.getResources().getIdentifier("tenpay_keyboard_0", "id", activity.getPackageName());
-                if (id == 0) return;
+                int fallbackId = decorView.getResources().getIdentifier("tenpay_keyboard_1", "id", activity.getPackageName());
+                if (id == 0 && fallbackId == 0) return;
                 List<View> keys = new ArrayList<>();
-                ViewUtils.getChildViews(decorView, id, keys);
+                if (id != 0) ViewUtils.getChildViews(decorView, id, keys);
+                if (fallbackId != 0 && fallbackId != id) ViewUtils.getChildViews(decorView, fallbackId, keys);
                 for (View key : keys) {
                     if (isPaymentViewVisible(key) && ViewUtils.isShownInScreen(key)) views.add(key);
                 }
@@ -170,10 +172,10 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                             return;
                         }
                         // A finished session still owns its target, so cancellation cannot restart authentication.
-                        if (mPaymentSession.owner() != activity || mPaymentSession.target() != key) {
+                        if (!ownsKeyboardPayment(activity, key)) {
                             onPayDialogShownByKeyboard(activity, decorView, key);
                         }
-                        if (mPaymentSession.owner() == activity && mPaymentSession.target() == key) {
+                        if (ownsKeyboardPayment(activity, key)) {
                             L.d("onViewFounded(LiteApp):", key, " rootView:", decorView);
                             ActivityViewObserverHolder.stop(current);
                         }
@@ -309,16 +311,14 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         }
         String passwordEncrypted = config.getPasswordEncrypted();
 
-        // Navigate: key -> row -> keyboardView(passwordLayout) -> container
-        ViewGroup passwordLayout = (keyboardKeyView.getParent() == null || !(keyboardKeyView.getParent().getParent() instanceof ViewGroup))
-                ? null : (ViewGroup) keyboardKeyView.getParent().getParent();
+        if (ownsKeyboardPayment(activity, keyboardKeyView)) {
+            return;
+        }
+        ViewGroup passwordLayout = keyboardLayout(keyboardKeyView);
         ViewGroup keyboardContainer = (passwordLayout == null || passwordLayout.getParent() == null || !(passwordLayout.getParent() instanceof ViewGroup))
                 ? null : (ViewGroup) passwordLayout.getParent();
 
         if (passwordLayout == null || keyboardContainer == null) {
-            ArrayList<View> childViews = new ArrayList<>();
-            ViewUtils.getChildViews(rootView, childViews);
-            L.d("[WeChat keyboardView NOT FOUND]  " + ViewUtils.viewsDesc(childViews));
             return;
         }
 
@@ -335,6 +335,19 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
             if (candidate instanceof EditText && isPaymentViewVisible(candidate)) input = (EditText) candidate;
         startPayment(activity, rootView, config, passwordEncrypted, input,
                 java.util.Collections.singletonList(passwordLayout), keyboardKeyView);
+    }
+
+    private static ViewGroup keyboardLayout(View key) {
+        ViewParent row = key == null ? null : key.getParent();
+        return row != null && row.getParent() instanceof ViewGroup ? (ViewGroup) row.getParent() : null;
+    }
+
+    private boolean ownsKeyboardPayment(Activity activity, View key) {
+        if (mPaymentSession.owner() != activity) return false;
+        Object target = mPaymentSession.target();
+        ViewGroup keyboard = keyboardLayout(key);
+        return target == key || (keyboard != null && target instanceof View
+                && keyboardLayout((View) target) == keyboard);
     }
 
     private void inputDigitalPasswordByTouch(Context context, View keyboard, String password, int versionCode,
