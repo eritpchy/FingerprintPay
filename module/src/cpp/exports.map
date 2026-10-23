@@ -1,0 +1,7 @@
+{
+    global:
+        zygisk_module_entry;
+        zygisk_companion_entry;
+        Java_com_surcumference_fingerprint_runtime_MemoryDexProbe_*;
+    local: *;
+};
