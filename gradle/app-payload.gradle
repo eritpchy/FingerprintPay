@@ -12,8 +12,8 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
             payload.parentFile.mkdirs()
             java.nio.file.Files.copy(apks.first().toPath(), payload.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             new java.util.zip.ZipFile(payload).withCloseable { zip ->
-                if (!zip.getEntry('classes.dex') || !zip.getEntry('assets/PublicSuffixDatabase.list')) {
-                    throw new GradleException('Module payload is missing DEX or OkHttp public suffix data')
+                if (!zip.getEntry('classes.dex')) {
+                    throw new GradleException('Module payload is missing DEX')
                 }
             }
         }

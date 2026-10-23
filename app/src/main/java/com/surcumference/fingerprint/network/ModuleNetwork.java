@@ -6,7 +6,6 @@ import com.hjq.http.config.IRequestHandler;
 import com.hjq.http.config.IRequestServer;
 import com.hjq.http.request.HttpRequest;
 import com.surcumference.fingerprint.util.ApplicationUtils;
-import com.surcumference.fingerprint.util.ModuleResources;
 import java.io.IOException;
 import java.lang.reflect.Type;
 import java.util.concurrent.TimeUnit;
@@ -19,8 +18,9 @@ public final class ModuleNetwork {
     private ModuleNetwork() {}
     public static synchronized OkHttpClient client() {
         if (client == null) {
-            Context context = ModuleResources.context(ApplicationUtils.getApplication());
+            Context context = ApplicationUtils.getApplication();
             OkHttp.INSTANCE.initialize(context);
+            EmbeddedPublicSuffixList.install();
             if (!"github.com".equals(okhttp3.HttpUrl.get("https://api.github.com/").topPrivateDomain())) {
                 throw new IllegalStateException("Module public suffix database is unavailable");
             }

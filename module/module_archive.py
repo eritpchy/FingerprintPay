@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import hashlib
-import io
 import pathlib
 import sys
 import zipfile
@@ -11,9 +10,6 @@ PAYLOAD = 'payload.bin'
 def read_file(archive, name):
     if name.startswith('lib/') and name.endswith('.so'):
         data = archive.read(name + '.head') + archive.read(PAYLOAD) + archive.read(name + '.tail')
-    elif name.startswith('webroot/'):
-        with zipfile.ZipFile(io.BytesIO(archive.read('resources.apk'))) as resources:
-            data = resources.read('assets/' + name[len('webroot/'):])
     else:
         data = archive.read(name)
     if hashlib.sha256(data).hexdigest() != archive.read(name + '.sha256sum').decode().strip():
@@ -40,7 +36,7 @@ def pack(source, destination, payload):
             for suffix, part in [('.head', data[:offset]), ('.tail', data[offset + len(shared):])]:
                 entries[name + suffix] = part
                 entries[name + suffix + '.sha256sum'] = hashlib.sha256(part).hexdigest().encode()
-        elif not name.startswith('webroot/') or name.endswith('.sha256sum'):
+        else:
             entries[name] = data
     destination.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(destination, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:

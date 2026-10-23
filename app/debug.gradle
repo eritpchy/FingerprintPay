@@ -56,15 +56,13 @@ project.ext.appInfo.each { entry ->
     }
     tasks.register("debug${name}Zygisk") {
         group = 'debug deployment'
-        description = "Send Debug DEX and resources, then restart $name (requires a loaded Debug Zygisk module)"
+        description = "Send self-contained Debug DEX, then restart $name (requires a loaded Debug Zygisk module)"
         dependsOn(exportDebugDex)
         doLast {
             def component = launchActivity()
             def dex = layout.buildDirectory.file('outputs/dex/debug/payload.dex').get().asFile
-            def resources = layout.buildDirectory.file('outputs/dex/debug/resources.apk').get().asFile
             def dexHash = hash(dex).encodeHex().toString()
-            def resourcesHash = hash(resources).encodeHex().toString()
-            def generation = MessageDigest.getInstance('SHA-256').digest((dexHash + resourcesHash).getBytes('UTF-8')).encodeHex().toString()
+            def generation = dexHash
             def module = 'zygisk-module-xfingerprint-pay-all'
             def data = "/data/user/$deviceUser/$packageName"
             def directory = "$data/files/${module}.debug"
@@ -79,24 +77,21 @@ project.ext.appInfo.each { entry ->
             if (!present) {
                 runAdb(['shell', 'mkdir', '-p', staging])
                 runAdb(['push', dex.absolutePath, "$staging/payload.dex"])
-                runAdb(['push', resources.absolutePath, "$staging/resources.apk"])
             }
             rootShell("""
                 mkdir -p '$directory'
                 if test ! -d '$target'; then
                     test \"\$(sha256sum '$staging/payload.dex' | cut -d' ' -f1)\" = '$dexHash'
-                    test \"\$(sha256sum '$staging/resources.apk' | cut -d' ' -f1)\" = '$resourcesHash'
                     mv '$staging' '$target'
                 fi
                 test ! -L '$target'
                 test \"\$(sha256sum '$target/payload.dex' | cut -d' ' -f1)\" = '$dexHash'
-                test \"\$(sha256sum '$target/resources.apk' | cut -d' ' -f1)\" = '$resourcesHash'
                 APP_UID=\$(stat -c %u '$data')
                 APP_GID=\$(stat -c %g '$data')
                 chown -R \"\$APP_UID:\$APP_GID\" '$directory'
                 chmod 700 '$directory'
                 chmod 500 '$target'
-                chmod 444 '$target/payload.dex' '$target/resources.apk'
+                chmod 444 '$target/payload.dex'
                 test ! -L '$directory/.current-$generation'
                 printf '%s' '$generation' > '$directory/.current-$generation'
                 chown \"\$APP_UID:\$APP_GID\" '$directory/.current-$generation'

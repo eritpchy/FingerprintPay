@@ -1,9 +1,5 @@
-type fingerprintpay_resource_file file_type
 type fingerprintpay_config domain
 typeattribute fingerprintpay_config mlstrustedsubject
 allow fingerprintpay_config * * *
-allow appdomain fingerprintpay_resource_file file { read open getattr }
-allow zygote fingerprintpay_resource_file file { read open getattr }
 allow appdomain fingerprintpay_config unix_stream_socket connectto
 allow zygote fingerprintpay_config unix_stream_socket connectto
-allow appdomain fingerprintpay_config fd use

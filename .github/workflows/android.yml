@@ -81,6 +81,8 @@ jobs:
                   assert read_file(archive, 'lib/' + abi + '/libzygisk-module-xfingerprint-pay-all.so')
                   assert archive.read('bin/' + abi + '/fpconfig')
               assert 'debug-file-dex' not in archive.namelist()
+              assert not any(name.endswith('.apk') for name in archive.namelist())
+              assert b'fingerprintpay_resource_file' not in archive.read('sepolicy.rule')
           mapping = (root / 'app/build/outputs/mapping/release/mapping.txt').read_text()
           assert 'com.surcumference.fingerprint.storage.XposedActivation -> com.surcumference.fingerprint.storage.XposedActivation:' in mapping
           assert re.search(r'\bframeworkVersion\(\)(?::[0-9:]+)? -> frameworkVersion$', mapping, re.MULTILINE)

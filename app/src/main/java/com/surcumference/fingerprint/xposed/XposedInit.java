@@ -25,18 +25,12 @@ import com.surcumference.fingerprint.util.log.L;
 import com.surcumference.fingerprint.xposed.loader.XposedPluginLoader;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.IXposedHookZygoteInit;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 @Keep
-public class XposedInit implements IXposedHookZygoteInit, IXposedHookLoadPackage {
-
-
-    public void initZygote(StartupParam startupParam) throws Throwable {
-        com.surcumference.fingerprint.util.ModuleResources.setPayloadPath(startupParam.modulePath);
-    }
+public class XposedInit implements IXposedHookLoadPackage {
 
     @Override
     public void handleLoadPackage(final LoadPackageParam lpparam) throws Throwable {

@@ -38,15 +38,9 @@ public:
     void onLoad(zygisk::Api* value, JNIEnv* jni) override { api = value; env = jni; }
     void preAppSpecialize(zygisk::AppSpecializeArgs* args) override {
         int fd = api->connectCompanion();
-        int directory = api->getModuleDir();
-        fingerprintPre(env, &args->app_data_dir, &args->nice_name, args->uid, fd, directory);
-        if (directory >= 0) close(directory);
+        fingerprintPre(env, &args->app_data_dir, &args->nice_name, args->uid, fd);
         if (fd >= 0) close(fd);
         if (!fingerprintEnabled()) api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
-        else if (fingerprintResourceFd() >= 0 && !api->exemptFd(fingerprintResourceFd())) {
-            LOGI("Resource descriptor exemption unavailable; deferring to configuration service");
-            fingerprintDeferResource();
-        }
     }
     void postAppSpecialize(const zygisk::AppSpecializeArgs* args) override {
         if (!fingerprintEnabled()) return;

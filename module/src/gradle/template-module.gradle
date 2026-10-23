@@ -69,14 +69,6 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
             into 'bin'
         }
         doLast {
-            def resources = file("$magiskDir/resources.apk")
-            def resourceHash = MessageDigest.getInstance('SHA-256').digest(resources.bytes).encodeHex().toString()
-            def expectedHash = '"sha256":"' + resourceHash + '"'
-            fileTree("$magiskDir/lib").matching { include '**/*.so' }.each { library ->
-                if (!new String(library.bytes, java.nio.charset.StandardCharsets.ISO_8859_1).contains(expectedHash)) {
-                    throw new GradleException("Native resource hash mismatch: ${library.name}")
-                }
-            }
             file("$magiskDir/description.original").text = metadata.description + "\n"
             if (variant.buildType == 'debug') file("$magiskDir/debug-file-dex").text = "1\n"
             fileTree("$magiskDir").visit { f ->

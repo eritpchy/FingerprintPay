@@ -27,8 +27,7 @@ bool readAll(int fd, unsigned char* data, size_t size) {
     return true;
 }
 }
-DebugPayloadResult loadDebugPayload(const char* appData, std::vector<unsigned char>& payload, int& resources) {
-    resources = -1;
+DebugPayloadResult loadDebugPayload(const char* appData, std::vector<unsigned char>& payload) {
     if (!appData || !*appData) return DebugPayloadResult::Invalid;
     std::string path = std::string(appData) + "/files/" MODULE_NAME ".debug";
     File root(open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
@@ -48,13 +47,7 @@ DebugPayloadResult loadDebugPayload(const char* appData, std::vector<unsigned ch
     std::vector<DexBytes> parsed;
     if (!readAll(dex.fd, bytes.data(), bytes.size()) || !parseDexPayload(bytes.data(), bytes.size(), parsed))
         return DebugPayloadResult::Invalid;
-    File resource(openat(directory.fd, "resources.apk", O_RDONLY | O_CLOEXEC | O_NOFOLLOW));
-    if (!readableFile(resource.fd, 128 * 1024 * 1024, info)) return DebugPayloadResult::Invalid;
-    unsigned char magic[4];
-    if (!readAll(resource.fd, magic, sizeof(magic)) || std::memcmp(magic, "PK\003\004", 4)
-            || lseek(resource.fd, 0, SEEK_SET) < 0) return DebugPayloadResult::Invalid;
     payload.swap(bytes);
-    resources = resource.fd; resource.fd = -1;
     return DebugPayloadResult::Loaded;
 }
 #endif

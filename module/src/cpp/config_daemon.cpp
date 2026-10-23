@@ -222,33 +222,6 @@ static json handle(const json& req, uid_t uid) {
     settings.erase("secret"); settings.erase("nonce"); settings.erase("legacySecret"); settings.erase("legacyNonce");
     return {{"ok", true}, {"passwordProtection", "tee-aes-gcm-v2"}, {"revision", revision}, {"settings", settings}, {"globals", globals}, {"pending", pending_status(target)}};
 }
-static int open_resource(const json& request, uid_t uid) {
-    if (!uid) throw std::runtime_error("Host access required");
-    auto scope = request; scope["op"] = "scope";
-    if (!handle(scope, uid).get<bool>()) throw std::runtime_error("Application disabled");
-#ifdef FP_CONFIG_TEST
-    std::string path = root + "/resources.apk";
-#else
-    std::string path = "/data/adb/modules/" MODULE_NAME "/resources.apk";
-#endif
-    int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    if (fd < 0) throw std::runtime_error("Resources unavailable");
-    try {
-        struct stat info{};
-        if (fstat(fd, &info) || !S_ISREG(info.st_mode) || info.st_uid != 0 || info.st_size < 4 || info.st_size > 32 * 1024 * 1024)
-            throw std::runtime_error("Invalid resources");
-        crypto_hash_sha256_state state; crypto_hash_sha256_init(&state);
-        unsigned char buffer[65536], hash[crypto_hash_sha256_BYTES]; ssize_t n;
-        while ((n = read(fd, buffer, sizeof(buffer))) != 0) {
-            if (n < 0) { if (errno == EINTR) continue; throw std::runtime_error("Cannot read resources"); }
-            crypto_hash_sha256_update(&state, buffer, n);
-        }
-        crypto_hash_sha256_final(&state, hash);
-        if (request.at("sha256") != hex(hash, sizeof(hash)) || lseek(fd, 0, SEEK_SET) < 0)
-            throw std::runtime_error("Resource version mismatch");
-    } catch (...) { close(fd); throw; }
-    return fd;
-}
 int main(int argc, char** argv) {
     if (getuid() != 0) { std::cerr << "FP_CONFIG_ERROR:ROOT_REQUIRED" << std::endl; return 1; }
     if (sodium_init() < 0) return 1;
@@ -323,20 +296,14 @@ int main(int argc, char** argv) {
             bool trusted = !getsockopt(client, SOL_SOCKET, SO_PEERCRED, &peer, &size);
             if (trusted && peer.uid) trusted = std::any_of(packages.begin(), packages.end(), [&](const std::string& pkg) { return belongs(peer.uid, pkg); });
             if (trusted && fp::frame(client, data, false)) {
-                bool resource = false;
                 try {
-                    json request = json::parse(data); resource = request.value("op", "") == "resource";
-                    if (resource) {
-                        int fd = open_resource(request, peer.uid); fp::send_resource(client, fd); close(fd);
-                    } else {
-                        json result = handle(request, peer.uid);
-                        data = request.value("op", "") == "scope" ? (result.get<bool>() ? "1" : "0") : result.dump();
-                    }
+                    json request = json::parse(data);
+                    json result = handle(request, peer.uid);
+                    data = request.value("op", "") == "scope" ? (result.get<bool>() ? "1" : "0") : result.dump();
                 } catch (const std::exception& error) {
-                    if (resource) fp::send_resource(client, -1);
-                    else data = json{{"ok", false}, {"error", error.what()}}.dump();
+                    data = json{{"ok", false}, {"error", error.what()}}.dump();
                 }
-                if (!resource) fp::frame(client, data, true);
+                fp::frame(client, data, true);
                 sodium_memzero(&data[0], data.size());
             }
             close(client);

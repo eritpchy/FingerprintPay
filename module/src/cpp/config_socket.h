@@ -43,43 +43,6 @@ inline int connect_store() {
     if (peer.uid != 0) { close(fd); errno = EPERM; return -1; }
     return fd;
 }
-inline bool send_resource(int socket, int resource) {
-    char result = resource >= 0 ? 'R' : 'E';
-    iovec data{&result, 1};
-    alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))]{};
-    msghdr message{}; message.msg_iov = &data; message.msg_iovlen = 1;
-    if (resource >= 0) {
-        message.msg_control = control; message.msg_controllen = sizeof(control);
-        cmsghdr* header = CMSG_FIRSTHDR(&message);
-        header->cmsg_level = SOL_SOCKET; header->cmsg_type = SCM_RIGHTS; header->cmsg_len = CMSG_LEN(sizeof(int));
-        memcpy(CMSG_DATA(header), &resource, sizeof(resource));
-    }
-    ssize_t n; do { n = sendmsg(socket, &message, MSG_NOSIGNAL); } while (n < 0 && errno == EINTR);
-    return n == 1;
-}
-inline int receive_resource(int socket) {
-    char result = 0; iovec data{&result, 1};
-    alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int) * 4)]{};
-    msghdr message{}; message.msg_iov = &data; message.msg_iovlen = 1;
-    message.msg_control = control; message.msg_controllen = sizeof(control);
-    ssize_t n; do { n = recvmsg(socket, &message, MSG_CMSG_CLOEXEC); } while (n < 0 && errno == EINTR);
-    int resource = -1, count = 0;
-    for (cmsghdr* header = CMSG_FIRSTHDR(&message); n > 0 && header; header = CMSG_NXTHDR(&message, header)) {
-        if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS || header->cmsg_len < CMSG_LEN(sizeof(int))) continue;
-        size_t size = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-        auto* fds = reinterpret_cast<int*>(CMSG_DATA(header));
-        for (size_t i = 0; i < size; ++i) { if (!count++) resource = fds[i]; else close(fds[i]); }
-    }
-    if (n != 1 || result != 'R' || count != 1 || (message.msg_flags & MSG_CTRUNC)) {
-        if (resource >= 0) close(resource); errno = EPROTO; return -1;
-    }
-    return resource;
-}
-inline int resource_request(std::string value) {
-    int socket = connect_store(); if (socket < 0) return -1;
-    int resource = frame(socket, value, true) ? receive_resource(socket) : -1;
-    int error = errno; close(socket); errno = error; return resource;
-}
 inline std::string request(std::string value, int* error = nullptr) {
     int fd = connect_store();
     if (fd < 0) { if (error) *error = errno; return ""; }

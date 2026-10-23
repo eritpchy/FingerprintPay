@@ -42,7 +42,6 @@ mod=out/'template/magisk_module'
 for p in (root/'module/src/common').iterdir():shutil.copy2(p,mod/p.name)
 (mod/'customize.sh').write_text('FRAMEWORK='+framework+'\nMODULE_LIB_NAME='+name+'\n'+(root/'module/src/installer/customize.sh').read_text())
 shutil.copytree(root/'module/webui/dist',mod/'webroot',dirs_exist_ok=True)
-shutil.copy2(root/'module/build/payload/resources.apk',mod/'resources.apk')
 shutil.copy2(root/'module/build/payload/manifest.json',mod/'payload-manifest.json')
 PY
 "$MODULE_TEMPLATE/gradlew" -p "$MODULE_TEMPLATE" "$MODULE_GRADLE_TASK" -PfingerprintRoot="$FINGERPRINT_ROOT" \

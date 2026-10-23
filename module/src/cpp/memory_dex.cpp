@@ -11,12 +11,11 @@
 #ifdef FP_DEBUG_FILE_DEX
 #include <unistd.h>
 static std::vector<unsigned char> debugProbePayload;
-static int debugProbeResources = -1;
 extern "C" JNIEXPORT jobject JNICALL
 Java_com_surcumference_fingerprint_runtime_MemoryDexProbe_loadDebug(JNIEnv* env, jclass, jstring appData) {
     const char* path = env->GetStringUTFChars(appData, nullptr);
     if (!path) return nullptr;
-    DebugPayloadResult result = loadDebugPayload(path, debugProbePayload, debugProbeResources);
+    DebugPayloadResult result = loadDebugPayload(path, debugProbePayload);
     env->ReleaseStringUTFChars(appData, path);
     if (result != DebugPayloadResult::Loaded) return nullptr;
     std::vector<DexBytes> dex;
@@ -24,10 +23,6 @@ Java_com_surcumference_fingerprint_runtime_MemoryDexProbe_loadDebug(JNIEnv* env,
     jclass cls = env->FindClass("java/lang/ClassLoader");
     jobject parent = env->CallStaticObjectMethod(cls, env->GetStaticMethodID(cls, "getSystemClassLoader", "()Ljava/lang/ClassLoader;"));
     return memoryDexLoader(env, dex.data(), dex.size(), parent);
-}
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_surcumference_fingerprint_runtime_MemoryDexProbe_debugResourcePath(JNIEnv* env, jclass) {
-    return env->NewStringUTF(("/proc/self/fd/" + std::to_string(debugProbeResources)).c_str());
 }
 #endif
 

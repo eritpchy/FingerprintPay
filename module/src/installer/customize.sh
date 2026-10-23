@@ -4,22 +4,17 @@ case "$ARCH" in arm) ABI=armeabi-v7a; ABI32=armeabi-v7a;; arm64) ABI=arm64-v8a; 
 unzip -o "$ZIPFILE" 'verify.sh' -d "$TMPDIR" >&2
 [ -f "$TMPDIR/verify.sh" ] || abort '! Missing integrity verifier'
 . "$TMPDIR/verify.sh"
-for name in module.prop description.original resources.apk payload-manifest.json service.sh runtime-status.sh update.sh uninstall.sh sepolicy.rule; do extract "$ZIPFILE" "$name" "$MODPATH"; done
+for name in module.prop description.original payload-manifest.json service.sh runtime-status.sh update.sh uninstall.sh sepolicy.rule; do extract "$ZIPFILE" "$name" "$MODPATH"; done
 if unzip -l "$ZIPFILE" | grep -q ' debug-file-dex$'; then extract "$ZIPFILE" debug-file-dex "$MODPATH"; fi
 mkdir -p "$MODPATH/bin" "$MODPATH/webroot"
 extract "$ZIPFILE" "bin/$ABI/fpconfig" "$MODPATH/bin" true
 set_perm "$MODPATH/bin/fpconfig" 0 0 0755
-extract_webui() {
-  local name="$1" destination="$2"
-  unzip -oj "$MODPATH/resources.apk" "assets/$name" -d "$destination" >&2 || abort_verify "Cannot extract WebUI $name"
-  verify_file "$ZIPFILE" "webroot/$name" "$destination/$(basename "$name")"
-}
-extract_webui manifest.json "$MODPATH/webroot"
+extract "$ZIPFILE" webroot/manifest.json "$MODPATH/webroot" true
 "$MODPATH/bin/fpconfig" webui-files "$MODPATH/webroot/manifest.json" > "$TMPDIR/webui-files" || abort '! Invalid WebUI manifest'
 while IFS= read -r name; do
   destination="$MODPATH/webroot/$(dirname "$name")"
   mkdir -p "$destination"
-  extract_webui "$name" "$destination"
+  extract "$ZIPFILE" "webroot/$name" "$destination" true
 done < "$TMPDIR/webui-files"
 mkdir -p "$MODPATH/zygisk"
 extract "$ZIPFILE" payload.bin "$TMPDIR"
@@ -34,9 +29,6 @@ install_library() {
 install_library "$ABI32"
 if [ "$ABI" != "$ABI32" ]; then
   install_library "$ABI"
-fi
-if [ "$API" -ge 26 ]; then
-  printf '%s\n' 'allow appdomain fingerprintpay_resource_file file map' 'allow zygote fingerprintpay_resource_file file map' >> "$MODPATH/sepolicy.rule" || abort '! Cannot configure resource permissions'
 fi
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/bin/fpconfig" 0 0 0755
