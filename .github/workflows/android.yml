@@ -62,7 +62,9 @@ jobs:
       - name: Verify release artifacts
         run: |
           python3 - <<'PYVERIFY'
-          import hashlib, json, os, pathlib, re, subprocess, zipfile
+          import hashlib, json, os, pathlib, re, subprocess, sys, zipfile
+          sys.path.insert(0, 'module')
+          from module_archive import read_file
           root = pathlib.Path('.')
           metadata = json.loads((root / 'app/build/outputs/apk/release/output-metadata.json').read_text())['elements'][0]
           apk = root / 'app/build/outputs/apk/release' / metadata['outputFile']
@@ -74,9 +76,9 @@ jobs:
           manifest = json.loads((dist / 'manifest.json').read_text())
           with zipfile.ZipFile(apk) as app, zipfile.ZipFile(module) as archive:
               for name in [*manifest['files'], 'manifest.json']:
-                  assert app.read('assets/' + name) == archive.read('webroot/' + name) == (dist / name).read_bytes(), name
+                  assert app.read('assets/' + name) == read_file(archive, 'webroot/' + name) == (dist / name).read_bytes(), name
               for abi in ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']:
-                  assert archive.read('lib/' + abi + '/libzygisk-module-xfingerprint-pay-all.so')
+                  assert read_file(archive, 'lib/' + abi + '/libzygisk-module-xfingerprint-pay-all.so')
                   assert archive.read('bin/' + abi + '/fpconfig')
               assert 'debug-file-dex' not in archive.namelist()
           mapping = (root / 'app/build/outputs/mapping/release/mapping.txt').read_text()

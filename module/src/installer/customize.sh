@@ -9,19 +9,31 @@ if unzip -l "$ZIPFILE" | grep -q ' debug-file-dex$'; then extract "$ZIPFILE" deb
 mkdir -p "$MODPATH/bin" "$MODPATH/webroot"
 extract "$ZIPFILE" "bin/$ABI/fpconfig" "$MODPATH/bin" true
 set_perm "$MODPATH/bin/fpconfig" 0 0 0755
-extract "$ZIPFILE" webroot/manifest.json "$MODPATH/webroot" true
+extract_webui() {
+  local name="$1" destination="$2"
+  unzip -oj "$MODPATH/resources.apk" "assets/$name" -d "$destination" >&2 || abort_verify "Cannot extract WebUI $name"
+  verify_file "$ZIPFILE" "webroot/$name" "$destination/$(basename "$name")"
+}
+extract_webui manifest.json "$MODPATH/webroot"
 "$MODPATH/bin/fpconfig" webui-files "$MODPATH/webroot/manifest.json" > "$TMPDIR/webui-files" || abort '! Invalid WebUI manifest'
 while IFS= read -r name; do
   destination="$MODPATH/webroot/$(dirname "$name")"
   mkdir -p "$destination"
-  extract "$ZIPFILE" "webroot/$name" "$destination" true
+  extract_webui "$name" "$destination"
 done < "$TMPDIR/webui-files"
 mkdir -p "$MODPATH/zygisk"
-extract "$ZIPFILE" "lib/$ABI32/lib$MODULE_LIB_NAME.so" "$MODPATH/zygisk" true
-mv "$MODPATH/zygisk/lib$MODULE_LIB_NAME.so" "$MODPATH/zygisk/$ABI32.so"
+extract "$ZIPFILE" payload.bin "$TMPDIR"
+install_library() {
+  local abi="$1" name="lib$MODULE_LIB_NAME.so" parts="$TMPDIR/library-$1"
+  mkdir -p "$parts" || abort '! Cannot prepare native library'
+  extract "$ZIPFILE" "lib/$abi/$name.head" "$parts" true
+  extract "$ZIPFILE" "lib/$abi/$name.tail" "$parts" true
+  cat "$parts/$name.head" "$TMPDIR/payload.bin" "$parts/$name.tail" > "$MODPATH/zygisk/$abi.so" || abort '! Cannot restore native library'
+  verify_file "$ZIPFILE" "lib/$abi/$name" "$MODPATH/zygisk/$abi.so"
+}
+install_library "$ABI32"
 if [ "$ABI" != "$ABI32" ]; then
-  extract "$ZIPFILE" "lib/$ABI/lib$MODULE_LIB_NAME.so" "$MODPATH/zygisk" true
-  mv "$MODPATH/zygisk/lib$MODULE_LIB_NAME.so" "$MODPATH/zygisk/$ABI.so"
+  install_library "$ABI"
 fi
 if [ "$API" -ge 26 ]; then
   printf '%s\n' 'allow appdomain fingerprintpay_resource_file file map' 'allow zygote fingerprintpay_resource_file file map' >> "$MODPATH/sepolicy.rule" || abort '! Cannot configure resource permissions'

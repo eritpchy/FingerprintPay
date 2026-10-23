@@ -91,11 +91,15 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
         }
     }
 
-    tasks.register("zip${variantCapped}", Zip) {
+    tasks.register("zip${variantCapped}", Exec) {
         dependsOn("prepareMagiskFiles${variantCapped}")
-        from magiskDir
-        archiveFileName = zipName
-        destinationDirectory = outDir
+        def packer = rootProject.file(project.property('fingerprintRoot').toString() + '/module/module_archive.py')
+        inputs.dir(magiskDir)
+        inputs.file(packer)
+        def payload = rootProject.file(project.property('fingerprintRoot').toString() + '/module/build/payload/payload.bin')
+        inputs.file(payload)
+        outputs.file(new File(outDir, zipName))
+        commandLine 'python3', packer, magiskDir, new File(outDir, zipName), payload
     }
 
     tasks.register("push${variantCapped}", Exec) {

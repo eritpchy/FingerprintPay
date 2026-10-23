@@ -27,7 +27,8 @@ shutil.copy2(source/'module/src/main/AndroidManifest.xml',out/'module/src/main/A
 mod=out/'template/magisk_module'
 if mod.exists():shutil.rmtree(mod)
 mod.mkdir(parents=True)
-for n in ['verify.sh','module.prop']:shutil.copy2(source/'template/magisk_module'/n,mod/n)
+shutil.copy2(source/'template/magisk_module/module.prop',mod/'module.prop')
+shutil.copy2(root/'module/src/installer/verify.sh',mod/'verify.sh')
 shutil.copytree(source/'template/magisk_module/META-INF',mod/'META-INF',dirs_exist_ok=True)
 (out/'gradle/wrapper').mkdir(parents=True,exist_ok=True)
 for n in ['gradlew','gradlew.bat','gradle.properties']:shutil.copy2(root/n,out/n)
