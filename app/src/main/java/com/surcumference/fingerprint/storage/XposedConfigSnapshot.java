@@ -6,6 +6,7 @@ import android.os.Process;
 import com.surcumference.fingerprint.BuildConfig;
 import de.robv.android.xposed.XSharedPreferences;
 import java.util.Iterator;
+import java.util.UUID;
 import org.json.JSONObject;
 
 public final class XposedConfigSnapshot {
@@ -13,27 +14,53 @@ public final class XposedConfigSnapshot {
     private static boolean reportedDirectRead;
     private final SharedPreferences shared;
     private final int user;
+    private String published;
     XposedConfigSnapshot(Context context) {
         user = Process.myUid() / 100000;
         SharedPreferences available = null;
         if (XposedActivation.frameworkVersion() >= 93) {
-            try { available = context.getSharedPreferences(NAME, Context.MODE_WORLD_READABLE); }
+            try {
+                SharedPreferences candidate = context.getSharedPreferences(NAME, Context.MODE_WORLD_READABLE);
+                // Opening preferences does not guarantee that LSPosed's shared directory is writable.
+                if (requiresRevocation(candidate) || write(candidate).commit()) available = candidate;
+                else {
+                    android.util.Log.w("FingerprintPay", "Runtime configuration sharing unavailable; using provider");
+                }
+            }
             catch (SecurityException ignored) {}
         }
         shared = available;
     }
     void invalidate() {
-        if (shared != null && !shared.edit().remove("document").commit())
+        published = null;
+        // Keep a tombstone even in memory after a failed commit, so retries cannot skip revocation.
+        if (shared != null && !write(shared).putString("document", "").commit())
             throw new IllegalStateException("Cannot invalidate runtime configuration");
     }
     void publish(JSONObject document) throws Exception {
         if (shared == null) return;
         String value = sanitized(document, user).toString();
-        if (!value.equals(shared.getString("document", null)) && !shared.edit().putString("document", value).commit())
+        if (value.equals(published)) return;
+        if (!write(shared).putString("document", value).commit())
             throw new IllegalStateException("Cannot publish runtime configuration");
+        published = value;
     }
-    public static void managementActive(Context context) {
-        SharedPreferences shared = new XposedConfigSnapshot(context).shared;
+    private static SharedPreferences.Editor write(SharedPreferences preferences) {
+        // commit() updates memory before disk; force a disk write when retrying a failed value.
+        return preferences.edit().putString("writeToken", UUID.randomUUID().toString());
+    }
+    private static boolean requiresRevocation(SharedPreferences preferences) {
+        String raw = preferences.getString("document", null);
+        if (raw == null) return false;
+        if (raw.isEmpty()) return true;
+        try {
+            JSONObject document = new JSONObject(raw);
+            if (document.getInt("schema") != 2) return true;
+            if (!document.getJSONObject("globals").getBoolean("license_agree")) return false;
+        } catch (Exception ignored) {}
+        return true;
+    }
+    void managementActive() {
         if (shared == null) return;
         long now = System.currentTimeMillis(), until = shared.getLong("managementUntil", 0);
         if (until < now + 120000 || until > now + 180000)
@@ -60,10 +87,12 @@ public final class XposedConfigSnapshot {
         } catch (LinkageError | RuntimeException unavailable) { return null; }
         // A fresh reader prevents a same-size, same-timestamp update from retaining a revoked credential.
         String raw = preferences.getString("document", null);
-        if (raw == null) return null;
+        if (raw == null || raw.isEmpty()) return null;
         int user = Process.myUid() / 100000;
         JSONObject document = new JSONObject(raw);
         validateOwner(document, request, context.getPackageName(), user);
+        // A snapshot without consent cannot authorize payment and may outlive a failed first setup.
+        if (!document.getJSONObject("globals").optBoolean("license_agree")) return null;
         if ("pendingPassword".equals(op) || "pendingDonation".equals(op)) {
             long remaining = preferences.getLong("managementUntil", 0) - System.currentTimeMillis();
             return remaining > 0 && remaining <= 180000 ? null

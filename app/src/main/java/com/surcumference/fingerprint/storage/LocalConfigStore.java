@@ -22,6 +22,9 @@ public final class LocalConfigStore implements ConfigStore {
             LauncherIcon.setVisible(context, document().getJSONObject("globals").getBoolean("show_icon"));
         }
     }
+    void managementActive() {
+        synchronized (LOCK) { snapshot.managementActive(); }
+    }
     private JSONObject document() throws Exception {
         if (preferences.contains("document")) {
             JSONObject doc = new JSONObject(preferences.getString("document", ""));

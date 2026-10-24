@@ -27,7 +27,7 @@ public final class ConfigProvider extends ContentProvider {
             String pkg = request.getString("package");
             String[] callers = getContext().getPackageManager().getPackagesForUid(uid);
             boolean own = uid == android.os.Process.myUid();
-            if (own) XposedConfigSnapshot.managementActive(getContext());
+            if (own) store.managementActive();
             boolean host = false;
             if (callers != null) for (String caller : callers) if (caller.equals(pkg) && ConfigContract.PACKAGES.contains(caller)) host = true;
             if (!own && !host) throw new SecurityException("Application access denied");
