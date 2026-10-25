@@ -21,6 +21,11 @@ public class WeChatPayDialog {
         public List<View> keyboardViews = new ArrayList<>();
         @Nullable
         public static WeChatPayDialog findFrom(int versionCode, ViewGroup rootView) {
+            return findFrom(versionCode, rootView, true);
+        }
+
+        @Nullable
+        public static WeChatPayDialog findFrom(int versionCode, ViewGroup rootView, boolean reportUnsupported) {
             try {
                 WeChatPayDialog payDialog = new WeChatPayDialog();
 
@@ -32,7 +37,7 @@ public class WeChatPayDialog {
                     }
                     if (view.getClass().getName().endsWith(".EditHintPasswdView")) {
                         L.d("mPasswordLayout:" + view);
-                        if (view instanceof ViewGroup) {
+                        if (view instanceof ViewGroup && ViewUtils.isShownInScreen(view)) {
                             payDialog.passwordLayout = (ViewGroup)view;
                         }
                     } else if (view.getClass().getName().endsWith(".TenpaySecureEditText")) {
@@ -46,12 +51,7 @@ public class WeChatPayDialog {
                             if (view.getTag() != null) {
                                 continue;
                             }
-                        if (view instanceof EditText) {
-                            if (payDialog.inputEditText != null) {
-                                if (!ViewUtils.isShownInScreen(view)) {
-                                    continue;
-                                }
-                            }
+                        if (view instanceof EditText && ViewUtils.isShownInScreen(view)) {
                             payDialog.inputEditText = (EditText)view;
                         }
                     } else if ((view.getClass().getName().endsWith(".MyKeyboardWindow")
@@ -68,17 +68,17 @@ public class WeChatPayDialog {
                 }
 
                 if (payDialog.passwordLayout == null) {
-                    Tools.doUnSupportVersionUpload(rootView.getContext(), "[WeChat passwordLayout NOT FOUND]  " + com.surcumference.fingerprint.util.ViewUtils.viewsDesc(childViews));
+                    if (reportUnsupported) Tools.doUnSupportVersionUpload(rootView.getContext(), "[WeChat passwordLayout NOT FOUND]  " + com.surcumference.fingerprint.util.ViewUtils.viewsDesc(childViews));
                     return null;
                 }
 
                 if (payDialog.inputEditText == null) {
-                    Tools.doUnSupportVersionUpload(rootView.getContext(), "[WeChat inputEditText NOT FOUND]  " + com.surcumference.fingerprint.util.ViewUtils.viewsDesc(childViews));
+                    if (reportUnsupported) Tools.doUnSupportVersionUpload(rootView.getContext(), "[WeChat inputEditText NOT FOUND]  " + com.surcumference.fingerprint.util.ViewUtils.viewsDesc(childViews));
                     return null;
                 }
 
                 if (payDialog.keyboardViews.size() == 0) {
-                    Tools.doUnSupportVersionUpload(rootView.getContext(), "[WeChat keyboardView NOT FOUND]  " + com.surcumference.fingerprint.util.ViewUtils.viewsDesc(childViews));
+                    if (reportUnsupported) Tools.doUnSupportVersionUpload(rootView.getContext(), "[WeChat keyboardView NOT FOUND]  " + com.surcumference.fingerprint.util.ViewUtils.viewsDesc(childViews));
                     return null;
                 }
 

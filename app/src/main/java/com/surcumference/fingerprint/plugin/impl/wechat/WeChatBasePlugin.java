@@ -183,52 +183,42 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         } else if (activityClzName.contains(".WalletPayUI")
                 || activityClzName.contains(".UIPageFragmentActivity")) {
             ActivityViewObserver activityViewObserver = new ActivityViewObserver(activity);
-            activityViewObserver.setViewIdentifyType(".EditHintPasswdView");
+            activityViewObserver.setWatchActivityViewOnly(true);
+            activityViewObserver.setActivityViewFinder(views -> {
+                List<View> windows = new ArrayList<>(ViewUtils.getWindowManagerViews());
+                View decor = activity.getWindow().getDecorView();
+                if (!windows.contains(decor)) windows.add(decor);
+                for (View window : windows) {
+                    if (!(window instanceof ViewGroup)) continue;
+                    List<View> forms = new ArrayList<>();
+                    ViewUtils.getChildViewsByType((ViewGroup) window, ".EditHintPasswdView", forms);
+                    for (View form : forms) {
+                        if (ActivityContext.find(form.getContext()) == activity) views.add(form);
+                    }
+                }
+            });
             ActivityViewObserverHolder.start(ActivityViewObserverHolder.Key.WeChatPayView,  activityViewObserver,
                     100, new ActivityViewObserver.IActivityViewListener() {
                 @Override
                 public void onViewFounded(ActivityViewObserver observer, View view) {
-                    ActivityViewObserver.IActivityViewListener l = this;
-                    ActivityViewObserverHolder.stop(observer);
-                    L.d("onViewFounded:", view, " rootView: ", view.getRootView());
-                    ViewGroup rootView = (ViewGroup) view.getRootView();
-                    view.post(() -> onPayDialogShown(activity, rootView));
-
-                    View.OnAttachStateChangeListener listener = mView2OnAttachStateChangeListenerMap.get(view);
-                    if (listener != null) {
-                        view.removeOnAttachStateChangeListener(listener);
+                    if (observerGeneration != mObserverGeneration || mObservedActivity != activity
+                            || !ActivityContext.isAlive(activity)) {
+                        ActivityViewObserverHolder.stop(observer);
+                        return;
                     }
-                    listener = new View.OnAttachStateChangeListener() {
-                        @Override
-                        public void onViewAttachedToWindow(View v) {
-                            L.d("onViewAttachedToWindow:", view);
-
+                    if (!(view instanceof ViewGroup) || !ViewUtils.isShownInScreen(view)) return;
+                    if (mPaymentMethodWatch != null && mPaymentMethodWatch.activity == activity
+                            && (mPaymentMethodWatch.selecting || mPaymentMethodWatch.awaitingPayment)) return;
+                    Object target = mPaymentSession.target();
+                    if (mPaymentSession.owner() == activity && target instanceof View) {
+                        for (View current = (View) target; current != null;
+                                current = current.getParent() instanceof View ? (View) current.getParent() : null) {
+                            if (current == view) return;
                         }
-
-                        @Override
-                        public void onViewDetachedFromWindow(View v) {
-                            L.d("onViewDetachedFromWindow:", view);
-                            Object target = mPaymentSession.target();
-                            if (mPaymentSession.owner() != activity || rootView != mPaymentRoot
-                                    || !(target instanceof View) || ((View) target).getWindowToken() != null) {
-                                return;
-                            }
-                            Context context = activity;
-                            onPayDialogDismiss(context, rootView);
-                            if (Config.from(context).isVolumeDownMonitorEnabled()) {
-                                ViewUtils.unregisterVolumeKeyDownEventListener(activity.getWindow());
-                            }
-                            if (mObserverRestart != null) mObserverRestart.cancel();
-                            mObserverRestart = Task.onMain(500, () -> {
-                                if (observerGeneration == mObserverGeneration && mObservedActivity == activity
-                                        && ActivityContext.isAlive(activity) && activity.hasWindowFocus()) {
-                                    ActivityViewObserverHolder.start(ActivityViewObserverHolder.Key.WeChatPayView, observer, 100, l);
-                                }
-                            });
-                        }
-                    };
-                    view.addOnAttachStateChangeListener(listener);
-                    mView2OnAttachStateChangeListenerMap.put(view, listener);
+                    }
+                    ViewGroup rootView = (ViewGroup) view.getRootView();
+                    if (WeChatPayDialog.findFrom(getVersionCode(activity), rootView, false) != null)
+                        onPayDialogShown(activity, rootView);
                 }
             });
         }
@@ -255,7 +245,6 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                     onPayDialogDismiss(activity, activity.getWindow().getDecorView(), DISMISS_WXA_LITE_APP_PAUSE);
                 }
             }
-            ActivityViewObserverHolder.stop(ActivityViewObserverHolder.Key.WeChatPayView);
             onPayDialogDismiss(activity, activity.getWindow().getDecorView(), DISMISS_NORMAL);
         } catch (Exception e) {
             L.e(e);
@@ -428,6 +417,11 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
             return;
         }
 
+        Object previous = mPaymentSession.target();
+        if (mPaymentSession.owner() == activity && previous != payDialogView.inputEditText
+                && previous instanceof View && !ViewUtils.isShownInScreen((View) previous)) {
+            closePayment();
+        }
         startPayment(activity, rootView, config, passwordEncrypted, payDialogView.inputEditText,
                 payDialogView.keyboardViews, null);
     }
@@ -594,7 +588,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         if (version >= Constant.WeChat.WECHAT_VERSION_CODE_8_0_43) {
             View keyboard = null;
             for (View candidate : keyboards) {
-                if (isPaymentViewVisible(candidate)) { keyboard = candidate; break; }
+                if (ViewUtils.isShownInScreen(candidate)) { keyboard = candidate; break; }
             }
             if (keyboard == null) { restore.run(); return; }
             List<View> keys = resolvePasswordKeys(context, keyboard, password,
