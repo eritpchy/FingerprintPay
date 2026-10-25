@@ -343,36 +343,28 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                                              long token, Runnable restore) {
         List<View> keys = resolvePasswordKeys(context, keyboard, password,
                 WeChatVersionControl.getDigitPasswordKeyPad(versionCode));
-        for (int i = 0; i < keys.size(); i++) {
-            View key = keys.get(i);
-            mInputHandler.postDelayed(() -> {
-                if (!isInputCurrent(token, key)) {
-                    if (mPaymentSession.owns(token)) restore.run();
-                    return;
-                }
-                try {
-                    long now = SystemClock.uptimeMillis();
-                    float x = key.getWidth() / 2f;
-                    float y = key.getHeight() / 2f;
-                    MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);
-                    MotionEvent up = MotionEvent.obtain(now, now + 25, MotionEvent.ACTION_UP, x, y, 0);
-                    try {
-                        boolean pressed = key.dispatchTouchEvent(down);
-                        boolean released = key.dispatchTouchEvent(up);
-                        if (!pressed || !released) restore.run();
-                    } finally {
-                        down.recycle();
-                        up.recycle();
-                    }
-                } catch (Exception e) {
-                    L.e("WeChat keyboard input failed", e);
-                    restore.run();
-                }
-            }, i * 70L);
-        }
+        inputPasswordKey(keys, 0, token, restore);
+    }
+
+    private void inputPasswordKey(List<View> keys, int index, long token, Runnable restore) {
         mInputHandler.postDelayed(() -> {
-            if (mPaymentSession.isActive(token)) restore.run();
-        }, keys.size() * 70L + 300);
+            View key = keys.get(index);
+            if (!isInputCurrent(token, key) || !key.isEnabled()) {
+                if (mPaymentSession.owns(token)) restore.run();
+                return;
+            }
+            try {
+                if (!ViewUtils.performActionClick(key)) { restore.run(); return; }
+                if (!mPaymentSession.isActive(token)) return;
+                if (index + 1 < keys.size()) inputPasswordKey(keys, index + 1, token, restore);
+                else mInputHandler.postDelayed(() -> {
+                    if (mPaymentSession.isActive(token)) restore.run();
+                }, 300);
+            } catch (Exception e) {
+                L.e("WeChat keyboard input failed", e);
+                restore.run();
+            }
+        }, index == 0 ? 0 : 70);
     }
 
     private List<View> resolvePasswordKeys(Context context, View keyboard, String password,
@@ -429,7 +421,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
     private void startPayment(Activity activity, ViewGroup root, Config config, String encrypted,
                               EditText input, List<View> keyboards, View keyboardKey) {
         View target = keyboardKey != null ? keyboardKey : input;
-        if (keyboards.isEmpty() || !isPaymentViewVisible(target)
+        if (keyboards.isEmpty() || !isPaymentViewVisible(target) || !isPasswordInputEmpty(input)
                 || !PaymentPasswordGuard.ready(config, target)
                 || !mPaymentSession.begin(activity, target, SystemClock.uptimeMillis())) return;
         long token = mPaymentSession.token();
@@ -475,9 +467,11 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         }
         initFingerPrintLock(activity, config, encrypted, password -> {
             if (!mPaymentSession.isActive(token)) return;
+            if (!isPasswordInputEmpty(input)) { finish.run(); return; }
             stopPaymentMethodWatch();
             dismissPaymentDialog();
             wakePasswordKeyboard(input);
+            if (!isPasswordInputEmpty(input)) { finish.run(); return; }
             BlackListUtils.applyIfNeeded(activity);
             if (keyboardKey != null) {
                 inputDigitalPasswordByTouch(activity, keyboards.get(0), password, getVersionCode(activity), token, finish);
@@ -492,6 +486,21 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         mPaymentDialog = null;
         if (dialog != null) ViewUtils.unregisterVolumeKeyDownEventListener(dialog.getWindow());
         DialogUtils.dismiss(dialog);
+    }
+
+    private static boolean isPasswordInputEmpty(EditText input) {
+        if (input == null) return true;
+        if (input.length() != 0) return false;
+        try {
+            // The secure buffer can retain characters even when no password dots are visible.
+            Object length = input.getClass().getMethod("getInputLength").invoke(input);
+            return length instanceof Number && ((Number) length).intValue() == 0;
+        } catch (NoSuchMethodException ignored) {
+            return true;
+        } catch (Exception error) {
+            L.e("WeChat password state unavailable", error);
+            return false;
+        }
     }
 
     private static void wakePasswordKeyboard(EditText input) {
@@ -580,7 +589,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
 
     private void inputDigitalPassword(Context context, EditText input, String password,
                                       List<View> keyboards, long token, Runnable restore) {
-        if (!isInputCurrent(token, input)) {
+        if (!isInputCurrent(token, input) || !isPasswordInputEmpty(input)) {
             restore.run();
             return;
         }
@@ -591,32 +600,9 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                 if (ViewUtils.isShownInScreen(candidate)) { keyboard = candidate; break; }
             }
             if (keyboard == null) { restore.run(); return; }
-            List<View> keys = resolvePasswordKeys(context, keyboard, password,
-                    WeChatVersionControl.getDigitPasswordKeyPad(version));
-            input.getText().clear();
-            input.requestFocus();
-            mInputHandler.post(() -> {
-                if (!isInputCurrent(token, input)) {
-                    if (mPaymentSession.owns(token)) restore.run();
-                    return;
-                }
-                try {
-                    for (View key : keys) {
-                        if (!isInputCurrent(token, key)) {
-                            if (mPaymentSession.owns(token)) restore.run();
-                            return;
-                        }
-                        if (!ViewUtils.performActionClick(key)) { restore.run(); return; }
-                    }
-                    if (mPaymentSession.isActive(token)) restore.run();
-                } catch (Exception e) {
-                    L.e("WeChat password input failed", e);
-                    restore.run();
-                }
-            });
+            inputDigitalPasswordByTouch(context, keyboard, password, version, token, restore);
         } else {
             if (version >= Constant.WeChat.WECHAT_VERSION_CODE_8_0_18) {
-                input.getText().clear();
                 for (int i = 0; i < password.length() && mPaymentSession.isActive(token); i++) {
                     input.append(String.valueOf(password.charAt(i)));
                 }
