@@ -57,7 +57,7 @@ public class ViewUtils {
         float x = Math.max(0, view.getWidth()) / 2f;
         float y = Math.max(0, view.getHeight()) / 2f;
         MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);
-        MotionEvent up = MotionEvent.obtain(now, now + 25, MotionEvent.ACTION_UP, x, y, 0);
+        MotionEvent up = MotionEvent.obtain(now, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, x, y, 0);
         try {
             boolean pressed = view.dispatchTouchEvent(down);
             boolean released = view.dispatchTouchEvent(up);
