@@ -8,14 +8,14 @@ import org.json.JSONObject;
 @androidx.annotation.Keep
 public final class LocalConfigStore implements ConfigStore {
     private static final Object LOCK = new Object();
-    private final SharedPreferences preferences;
+    private final ConfigDatabase database;
     private final PendingPasswords pending = new PendingPasswords(LOCK);
     private final Context context;
     private final XposedConfigSnapshot snapshot;
     public LocalConfigStore(Context context) {
-        this.context = context.getApplicationContext();
-        preferences = context.getSharedPreferences("unified_config_v1", Context.MODE_PRIVATE);
-        snapshot = new XposedConfigSnapshot(context);
+        this.context = context.getApplicationContext() != null ? context.getApplicationContext() : context;
+        database = new ConfigDatabase(this.context);
+        snapshot = new XposedConfigSnapshot(this.context);
     }
     void syncLauncherIcon() throws Exception {
         synchronized (LOCK) {
@@ -26,8 +26,18 @@ public final class LocalConfigStore implements ConfigStore {
         synchronized (LOCK) { snapshot.managementActive(); }
     }
     private JSONObject document() throws Exception {
-        if (preferences.contains("document")) {
-            JSONObject doc = new JSONObject(preferences.getString("document", ""));
+        String saved = database.read();
+        boolean migrated = saved == null;
+        if (saved == null) saved = new PrivateConfigFile(context).read();
+        if (saved == null) {
+            SharedPreferences preferences = context.getSharedPreferences("unified_config_v1", Context.MODE_PRIVATE);
+            if (preferences.contains("document")) saved = preferences.getString("document", "");
+        }
+        if (saved != null) {
+            JSONObject doc = new JSONObject(saved);
+            doc.getJSONObject("globals");
+            doc.getJSONObject("apps");
+            doc.getLong("revision");
             if (doc.getInt("schema") == 1) {
                 JSONObject apps = doc.getJSONObject("apps");
                 Iterator<String> names = apps.keys();
@@ -40,8 +50,10 @@ public final class LocalConfigStore implements ConfigStore {
                     }
                 }
                 doc.put("schema", 2).put("revision", doc.getLong("revision") + 1);
-                if (!preferences.edit().putString("document", doc.toString()).commit()) throw new IllegalStateException("Cannot migrate configuration");
+                migrated = true;
             }
+            if (doc.getInt("schema") != 2) throw new IllegalStateException("Unsupported configuration schema");
+            if (migrated) database.write(doc.toString());
             return doc;
         }
         JSONObject globals = new JSONObject().put("auto_update", true).put("license_agree", false).put("show_icon", true);
@@ -51,9 +63,7 @@ public final class LocalConfigStore implements ConfigStore {
         if (old.contains("license_agree")) globals.put("license_agree", old.getBoolean("license_agree", false));
         if (old.contains("skip_version")) globals.put("skip_xposed", old.getString("skip_version", ""));
         if (launcher.contains("show_icon")) globals.put("show_icon", launcher.getBoolean("show_icon", true));
-        if (!preferences.edit().putString("document", doc.toString()).commit()) throw new IllegalStateException("Cannot initialize configuration");
-        old.edit().remove("license_agree").remove("skip_version").commit();
-        launcher.edit().remove("show_icon").commit();
+        database.write(doc.toString());
         return doc;
     }
     @Override public JSONObject request(JSONObject request) throws Exception {
@@ -123,7 +133,7 @@ public final class LocalConfigStore implements ConfigStore {
                 } else throw new IllegalArgumentException("Unknown operation");
                 apps.put(pkg, settings); doc.put("revision", ++revision);
                 snapshot.invalidate();
-                if (!preferences.edit().putString("document", doc.toString()).commit()) throw new IllegalStateException("Cannot save configuration");
+                database.write(doc.toString());
                 snapshot.publish(doc);
                 if ("commitPassword".equals(op)) pending.finish(pkg, request.getString("id"), "done");
             }

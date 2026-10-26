@@ -61,6 +61,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".activity.ConfigActivity" android:theme="@style/HomeTheme" android:exported="false"/>
+        <service android:name=".storage.ConfigService" android:exported="true"/>
         <provider android:name=".storage.ConfigProvider" android:authorities="com.surcumference.fingerprintpay.config" android:exported="true">
             <grant-uri-permission android:path="/runtime"/>
         </provider>

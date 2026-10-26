@@ -1,6 +1,7 @@
 package com.surcumference.fingerprint.storage;
 
 import android.content.Context;
+import android.content.ContentProviderClient;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 import android.net.Uri;
@@ -38,19 +39,60 @@ public final class ConfigStores {
             } catch (SecurityException ignored) { /* Older management APKs do not offer a grant. */ }
         }
         return request -> {
-            if (ConfigContract.PACKAGES.contains(context.getPackageName())) {
-                JSONObject local = XposedConfigSnapshot.read(context, request);
-                if (local != null) return local;
+            String raw = request.toString();
+            JSONObject response;
+            try {
+                response = providerRequest(app, raw);
+            } catch (Exception unavailable) {
+                // A dispatched mutation may have committed even when its response was lost.
+                if (!(unavailable instanceof ProviderUnavailable) && !repeatable(request.optString("op")))
+                    throw new IllegalStateException("Configuration result unavailable; refresh before retrying", unavailable);
+                try {
+                    return ConfigServiceClient.request(app, request);
+                } catch (Exception serviceUnavailable) {
+                    if (serviceUnavailable instanceof RequestRejected || serviceUnavailable instanceof SecurityException
+                            || !repeatable(request.optString("op"))) throw serviceUnavailable;
+                    if (ConfigContract.PACKAGES.contains(context.getPackageName())) {
+                        try {
+                            JSONObject local = XposedConfigSnapshot.read(context, request);
+                            if (local != null) return local;
+                        } catch (LinkageError | Exception snapshotUnavailable) {
+                            serviceUnavailable.addSuppressed(snapshotUnavailable);
+                        }
+                    }
+                    serviceUnavailable.addSuppressed(unavailable);
+                    throw serviceUnavailable;
+                }
             }
-            Bundle args = new Bundle();
-            args.putString("request", request.toString());
-            Bundle result = app.getContentResolver().call(Uri.parse("content://" + ConfigContract.AUTHORITY), "request", null, args);
-            if (result == null) throw new IllegalStateException("Configuration provider unavailable");
-            return checked(new JSONObject(result.getString("response", "{}")));
+            return checked(response);
         };
     }
+    private static JSONObject providerRequest(Context context, String request) throws Exception {
+        ContentProviderClient client = context.getContentResolver().acquireUnstableContentProviderClient(
+                Uri.parse("content://" + ConfigContract.AUTHORITY));
+        if (client == null) throw new ProviderUnavailable();
+        try {
+            Bundle args = new Bundle();
+            args.putString("request", request);
+            Bundle result = client.call("request", null, args);
+            if (result == null || !result.containsKey("response")) throw new IllegalStateException("Empty configuration response");
+            JSONObject response = new JSONObject(result.getString("response"));
+            if (!(response.opt("ok") instanceof Boolean)) throw new IllegalStateException("Invalid configuration response");
+            return response;
+        } finally {
+            client.release();
+        }
+    }
+    static boolean repeatable(String op) {
+        return "read".equals(op) || "credential".equals(op) || "claimPassword".equals(op)
+                || "passwordStatus".equals(op) || "pendingDonation".equals(op) || "donationStatus".equals(op);
+    }
+    private static final class ProviderUnavailable extends Exception {}
+    private static final class RequestRejected extends IllegalStateException {
+        RequestRejected(String message) { super(message); }
+    }
     public static JSONObject checked(JSONObject response) {
-        if (!response.optBoolean("ok")) throw new IllegalStateException(response.optString("error", "Configuration unavailable"));
+        if (!response.optBoolean("ok")) throw new RequestRejected(response.optString("error", "Configuration unavailable"));
         return response;
     }
     @androidx.annotation.Keep
