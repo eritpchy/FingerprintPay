@@ -1,6 +1,7 @@
 #include "config_socket.h"
 #include "json.hpp"
 #include "runtime_status.h"
+#include "root_profile.h"
 #include <sodium.h>
 #include <sys/file.h>
 #include <poll.h>
@@ -245,6 +246,34 @@ int main(int argc, char** argv) {
                 names += name + '\n';
             }
             std::cout << names;
+            return 0;
+        }
+        if (argc == 5 && std::string(argv[1]) == "root-profile") {
+            std::string backend(argv[2]), pkg(argv[3]), user_text(argv[4]);
+            if ((backend != "KernelSU" && backend != "APatch")
+                    || std::find(packages.begin(), packages.end(), pkg) == packages.end()
+                    || user_text.empty() || user_text.size() > 5
+                    || user_text.find_first_not_of("0123456789") != std::string::npos)
+                throw std::runtime_error("Invalid profile target");
+            unsigned user = std::stoul(user_text);
+            if (user > 21474) throw std::runtime_error("Invalid profile user");
+            struct stat st{};
+            // Root shells may inherit the manager's isolated application mounts.
+            std::string data = "/proc/1/root/data/user_de";
+            if (stat(data.c_str(), &st) || !S_ISDIR(st.st_mode))
+                throw std::runtime_error("Application namespace unavailable");
+            std::string path = data + "/" + std::to_string(user) + "/" + pkg;
+            if (stat(path.c_str(), &st)) {
+                if (errno == ENOENT) { std::cout << "missing" << std::endl; return 0; }
+                throw std::runtime_error("Application UID unavailable");
+            }
+            if (st.st_uid / 100000 != user || !belongs(st.st_uid, pkg))
+                throw std::runtime_error("Application UID mismatch");
+            auto profile = backend == "KernelSU" ? fp::kernelsu_profile(st.st_uid)
+                    : fp::apatch_profile(read_file("/data/adb/ap/package_config"), st.st_uid);
+            if (backend == "APatch" && access("/data/adb/ap/package_config", R_OK))
+                throw std::runtime_error("APatch profile unavailable");
+            std::cout << (profile.excluded ? "1" : "0") << '|' << (profile.granted ? "1" : "0") << std::endl;
             return 0;
         }
         if (argc == 2 && std::string(argv[1]) == "rezygisk-status") {

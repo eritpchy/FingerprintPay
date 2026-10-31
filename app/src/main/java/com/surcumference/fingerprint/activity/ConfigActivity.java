@@ -181,8 +181,14 @@ public class ConfigActivity extends Activity {
             try {
                 if (!com.surcumference.fingerprint.storage.ConfigContract.PACKAGES.contains(pkg)) throw new SecurityException("Unknown application");
                 if (!isForeground()) throw new IllegalStateException("请返回设置页面后重试录入");
-                Intent intent = getPackageManager().getLaunchIntentForPackage(pkg);
-                if (intent == null) throw new IllegalStateException("此用户未安装所选应用");
+                Intent intent = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(pkg);
+                java.util.List<android.content.pm.ResolveInfo> entries = getPackageManager().queryIntentActivities(intent, 0);
+                if (entries.isEmpty()) throw new IllegalStateException("无法找到所选应用的主入口");
+                android.content.pm.ActivityInfo entry = entries.get(0).activityInfo;
+                if (entry == null || !pkg.equals(entry.packageName) || !entry.exported)
+                    throw new IllegalStateException("无法找到所选应用的主入口");
+                intent.setClassName(entry.packageName, entry.name);
+                intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
                 Toast.makeText(ConfigActivity.this,
                         "请在打开的应用中验证指纹；未弹出请返回设置重试，并检查模块作用域", Toast.LENGTH_LONG).show();
                 startActivity(intent);

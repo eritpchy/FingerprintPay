@@ -49,9 +49,7 @@ public class WeChatPlugin {
                 });
             }
             com.surcumference.fingerprint.xposed.XposedAppLifecycle.install(plugin);
-            com.surcumference.fingerprint.storage.XposedRuntime.install(application, true);
         } catch (Throwable l) {
-            try { com.surcumference.fingerprint.storage.XposedRuntime.install(application, false); } catch (Throwable ignored) {}
             L.e(l);
             XposedBridge.log(l);
         }

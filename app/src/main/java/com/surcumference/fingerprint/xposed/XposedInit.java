@@ -38,6 +38,10 @@ public class XposedInit implements IXposedHookLoadPackage {
             XposedHelpers.findAndHookMethod("com.surcumference.fingerprint.storage.XposedActivation", lpparam.classLoader,
                     "frameworkVersion", de.robv.android.xposed.XC_MethodReplacement.returnConstant(
                             de.robv.android.xposed.XposedBridge.getXposedVersion()));
+            String tag = String.valueOf(XposedHelpers.getStaticObjectField(de.robv.android.xposed.XposedBridge.class, "TAG"));
+            String framework = tag.contains("Vector") ? "Vector" : tag.contains("LSPosed") ? "LSPosed" : "Xposed";
+            XposedHelpers.findAndHookMethod("com.surcumference.fingerprint.storage.XposedActivation", lpparam.classLoader,
+                    "frameworkName", de.robv.android.xposed.XC_MethodReplacement.returnConstant(framework));
             return;
         }
         if (!com.surcumference.fingerprint.storage.ConfigContract.PACKAGES.contains(lpparam.packageName)) {
