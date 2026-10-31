@@ -8,9 +8,9 @@
       "bytes": 4360
     },
     "app.js": {
-      "sourceSha256": "f494ddc8119e797136694cfa17171ac07730e539aef01704471be88544179309",
-      "sha256": "0eb064aa287c824ea7e7258c87b7dca3fd823023a828e316b3664ffdc8ca65a3",
-      "bytes": 37586
+      "sourceSha256": "761a4d32f7c8f6da2e80d07d26429901e41cecf3f38d7e44aa0e045f3843d2f0",
+      "sha256": "c805edcd05518f4cbd779c46249fd3589969fa3c3c975cb77fcd24b44586d3f4",
+      "bytes": 38754
     },
     "compat.js": {
       "sourceSha256": "a2897f71d9c1ed191c46fdba26a638bbb7f42dcd06d0dee52e215ec9cd108589",
@@ -53,8 +53,8 @@
       "bytes": 1342
     },
     "index.html": {
-      "sourceSha256": "fd04ab385984c94350c73caac77a29fc0f9748bea07e02e99a2f04b0fd75abcb",
-      "sha256": "7d4505b453155bc4da60cb6812ef578178aeff8388f08c33f23e2ecf614f1f70",
+      "sourceSha256": "16d3bc16e5fab964fe1e5feb635527748252170007b92e1ea60f8e5bff63781c",
+      "sha256": "18468c2340370236d0cb95db22cc8cc901f04a2d5b5288f1afa1ab988e0dc29b",
       "bytes": 15759
     },
     "module-update.js": {
