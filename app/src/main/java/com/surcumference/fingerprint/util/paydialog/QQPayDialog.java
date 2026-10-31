@@ -125,11 +125,20 @@ public class QQPayDialog {
 
     private static boolean isShortPasswordField(View view) {
         if (!view.isShown() || !view.isEnabled() || view.getAlpha() <= 0) return false;
-        if (isPasswordDescription(view.getContentDescription())) return true;
+        CharSequence description = view.getContentDescription();
+        if (isPasswordDescription(description)) return true;
         AccessibilityNodeInfo node = view.createAccessibilityNodeInfo();
-        if (node == null) return false;
-        try { return isPasswordDescription(node.getContentDescription()); }
-        finally { node.recycle(); }
+        try {
+            CharSequence accessible = node == null ? null : node.getContentDescription();
+            if (isPasswordDescription(accessible)) return true;
+            if (!android.text.TextUtils.isEmpty(description) || !android.text.TextUtils.isEmpty(accessible)
+                    || !"com.tenpay.password.PasswordEditText".equals(view.getClass().getName())) return false;
+            EditText input = (EditText) view;
+            int type = input.getInputType();
+            return input.length() == 0
+                    && (type & android.text.InputType.TYPE_MASK_CLASS) == android.text.InputType.TYPE_CLASS_NUMBER
+                    && (type & android.text.InputType.TYPE_MASK_VARIATION) == android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD;
+        } finally { if (node != null) node.recycle(); }
     }
 
     private static boolean isPasswordDescription(CharSequence description) {

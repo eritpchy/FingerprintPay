@@ -26,6 +26,7 @@ import com.surcumference.fingerprint.util.BlackListUtils;
 import com.surcumference.fingerprint.util.Config;
 import com.surcumference.fingerprint.util.Task;
 import com.surcumference.fingerprint.util.PaymentController;
+import com.surcumference.fingerprint.util.PaymentMethodObserver;
 import com.surcumference.fingerprint.util.ActivityContext;
 import com.surcumference.fingerprint.bean.DigitPasswordKeyPadInfo;
 import android.os.SystemClock;
@@ -138,7 +139,7 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
                     mPayment.finish(token, SystemClock.uptimeMillis());
                 }
             };
-            if (config.isUnderDisplayFingerprint()) {
+            if (config.isHideFingerprintDialog()) {
                 mPayment.bindToPaymentWindow(token, owner.getWindow(), config.isVolumeDownMonitorEnabled(), () -> {
                     mFingerprintIdentifyTemporaryBlocking = true;
                     Toaster.showLong(Lang.getString(R.id.toast_fingerprint_temporary_disabled));
@@ -146,6 +147,7 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
                 });
                 mPayment.protectDigits(token, rootView, new DigitPasswordKeyPadInfo(PACKAGE_NAME_UNIONPAY,
                         null, null, null, null, null, null, null, null, null, null));
+                mPayment.showFingerprintPrompt(token, activity);
                 initFingerPrintLock(context, null, passwordEncrypted, onSuccess);
                 return;
             }
@@ -406,27 +408,19 @@ public class UnionPayBasePlugin implements IAppPlugin, IMockCurrentUser {
 
     private void watchPaymentMethod(Activity owner, View targetView, View rootView) {
         removePaymentMethodListener(targetView);
-        ViewTreeObserver.OnGlobalLayoutListener listener = new ViewTreeObserver.OnGlobalLayoutListener() {
-            private boolean selecting;
-            @Override public void onGlobalLayout() {
-                if (!ActivityContext.isAlive(owner) || targetView.getWindowToken() == null
-                        || !mActivityResumedMap.containsKey(owner)) return;
-                View selection = ViewUtils.findViewByText(rootView, "选择付款方式", "Select payment method");
-                boolean visible = selection != null && selection.isShown() && ViewUtils.isViewVisibleInScreen(selection)
-                        && ViewUtils.isShownInScreen(selection);
-                if (selecting == visible) return;
-                selecting = visible;
-                if (visible) mPayment.close(owner);
-                else showFingerPrintDialog(owner, targetView);
-            }
-        };
-        targetView.getViewTreeObserver().addOnGlobalLayoutListener(listener);
+        PaymentMethodObserver listener = new PaymentMethodObserver(rootView, () -> {
+            if (ActivityContext.isAlive(owner) && mActivityResumedMap.containsKey(owner)) mPayment.close(owner);
+        }, () -> {
+            if (ActivityContext.isAlive(owner) && targetView.getWindowToken() != null
+                    && mActivityResumedMap.containsKey(owner)) showFingerPrintDialog(owner, targetView);
+        });
         targetView.setTag(R.id.unionpay_payment_method_listener, listener);
     }
 
     private void removePaymentMethodListener(View view) {
         Object listener = view.getTag(R.id.unionpay_payment_method_listener);
-        if (listener instanceof ViewTreeObserver.OnGlobalLayoutListener && view.getViewTreeObserver().isAlive()) {
+        if (listener instanceof PaymentMethodObserver) ((PaymentMethodObserver) listener).close();
+        else if (listener instanceof ViewTreeObserver.OnGlobalLayoutListener && view.getViewTreeObserver().isAlive()) {
             view.getViewTreeObserver().removeOnGlobalLayoutListener((ViewTreeObserver.OnGlobalLayoutListener) listener);
         }
         view.setTag(R.id.unionpay_payment_method_listener, null);
