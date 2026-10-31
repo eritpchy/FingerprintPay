@@ -32,7 +32,6 @@ import com.surcumference.fingerprint.util.ApplicationUtils;
 import com.surcumference.fingerprint.util.BizBiometricIdentify;
 import com.surcumference.fingerprint.util.BlackListUtils;
 import com.surcumference.fingerprint.util.Config;
-import com.surcumference.fingerprint.util.NotifyUtils;
 import com.surcumference.fingerprint.util.Task;
 import com.surcumference.fingerprint.util.ViewUtils;
 import com.surcumference.fingerprint.util.WeChatVersionControl;
@@ -341,11 +340,34 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                 && keyboardLayout((View) target) == keyboard);
     }
 
-    private void inputDigitalPasswordByTouch(Context context, View keyboard, String password, int versionCode,
+    private void inputDigitalPasswordByKeyboard(Context context, View keyboard, String password, int versionCode,
                                              long token, Runnable restore) {
         List<View> keys = resolvePasswordKeys(context, keyboard, password,
                 WeChatVersionControl.getDigitPasswordKeyPad(versionCode));
-        inputPasswordKey(keys, new java.util.IdentityHashMap<>(), 0, token, restore, 0);
+        boolean direct = true;
+        for (View key : keys) direct &= key.hasOnClickListeners();
+        if (!direct) {
+            inputPasswordKey(keys, new java.util.IdentityHashMap<>(), 0, token, restore, 0);
+            return;
+        }
+        mInputHandler.post(() -> {
+            try {
+                for (View key : keys) {
+                    if (!isInputCurrent(token, key) || !key.isEnabled()) {
+                        if (mPaymentSession.owns(token)) restore.run();
+                        return;
+                    }
+                    // Invoke the host listener synchronously so repeated keys cannot coalesce in View's posted click.
+                    if (!key.performClick()) { restore.run(); return; }
+                    if (!mPaymentSession.isActive(token)) return;
+                }
+                mPaymentDimmer.completed();
+                restore.run();
+            } catch (Exception error) {
+                L.e("WeChat keyboard input failed", error);
+                restore.run();
+            }
+        });
     }
 
     private void inputPasswordKey(List<View> keys, java.util.Map<View, Long> readyAt,
@@ -413,10 +435,9 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         String passwordEncrypted = config.getPasswordEncrypted();
 
         int versionCode = getVersionCode(context);
-        WeChatPayDialog payDialogView = WeChatPayDialog.findFrom(versionCode, rootView);
+        WeChatPayDialog payDialogView = WeChatPayDialog.findFrom(versionCode, rootView, false);
         L.d(payDialogView);
         if (payDialogView == null) {
-            NotifyUtils.notifyVersionUnSupport(context, Constant.PACKAGE_NAME_WECHAT);
             return;
         }
 
@@ -461,7 +482,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
         mPaymentMethodWatch = new PaymentMethodWatch(activity, root, keyboardKey);
         mPaymentMethodWatch.schedule();
         mPaymentDimmer.show(target);
-        if (!config.isUnderDisplayFingerprint()) {
+        if (!config.isHideFingerprintDialog()) {
             AlipayPayView prompt = new AlipayPayView(activity)
                     .withOnCancelButtonClickListener(shown -> finish.run())
                     .withOnDismissListener(shown -> {
@@ -488,7 +509,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
             if (!isPasswordInputEmpty(input)) { finish.run(); return; }
             BlackListUtils.applyIfNeeded(activity);
             if (keyboardKey != null) {
-                inputDigitalPasswordByTouch(activity, keyboards.get(0), password, getVersionCode(activity), token, finish);
+                inputDigitalPasswordByKeyboard(activity, keyboards.get(0), password, getVersionCode(activity), token, finish);
             } else {
                 inputDigitalPassword(activity, input, password, keyboards, token, finish);
             }
@@ -578,7 +599,8 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                         List<View> forms = new ArrayList<>();
                         ViewUtils.getChildViewsByType((ViewGroup) window, ".EditHintPasswdView", forms);
                         if (forms.isEmpty()) continue;
-                        WeChatPayDialog form = WeChatPayDialog.findFrom(getVersionCode(activity), (ViewGroup) window);
+                        // The host restores its form and keyboard across multiple layout passes.
+                        WeChatPayDialog form = WeChatPayDialog.findFrom(getVersionCode(activity), (ViewGroup) window, false);
                         if (form == null || !isPaymentViewVisible(form.inputEditText)) continue;
                         stopPaymentMethodWatch();
                         if (form.inputEditText.length() == 0) onPayDialogShown(activity, (ViewGroup) window);
@@ -614,7 +636,7 @@ public class WeChatBasePlugin implements IAppPlugin, IMockCurrentUser {
                 if (ViewUtils.isShownInScreen(candidate)) { keyboard = candidate; break; }
             }
             if (keyboard == null) { restore.run(); return; }
-            inputDigitalPasswordByTouch(context, keyboard, password, version, token, restore);
+            inputDigitalPasswordByKeyboard(context, keyboard, password, version, token, restore);
         } else {
             if (version >= Constant.WeChat.WECHAT_VERSION_CODE_8_0_18) {
                 for (int i = 0; i < password.length() && mPaymentSession.isActive(token); i++) {
