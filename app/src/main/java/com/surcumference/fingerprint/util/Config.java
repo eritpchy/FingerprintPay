@@ -16,10 +16,13 @@ import java.util.Locale;
  */
 public final class Config {
     private static final java.util.Set<String> cleanedLegacyPackages = new java.util.HashSet<>();
+    private final Context context;
     private final String pkg;
     private final ConfigStore store;
     public static Config from(Context context) { return new Config(context); }
     private Config(Context context) {
+        this.context = context;
+        com.surcumference.fingerprint.sensor.SensorLocation.underDisplay(context);
         pkg = ConfigContract.PACKAGES.contains(context.getPackageName()) ? context.getPackageName() : ConfigContract.PACKAGES.get(0);
         store = ConfigStores.forContext(context);
         cleanupLegacy(context);
@@ -112,8 +115,12 @@ public final class Config {
         if (!isOn() || !token.equals(getPasswordEncrypted())) throw new SecurityException("Password changed or payment disabled");
     }
 
-    public boolean isShowFingerprintIcon() { return option("fingerprint_icon", false); }
-    public boolean isUnderDisplayFingerprint() { return !isShowFingerprintIcon(); }
+    public boolean isShowFingerprintIcon() { return !isUnderDisplayFingerprint(); }
+    public boolean isHideFingerprintDialog() { return isUseBiometricApi() || isUnderDisplayFingerprint() && option("hide_fingerprint_dialog", false); }
+    public boolean isUnderDisplayFingerprint() {
+        try { return com.surcumference.fingerprint.sensor.SensorLocation.underDisplay(context, read().getJSONObject("settings")); }
+        catch (Exception unavailable) { return false; }
+    }
     public boolean isUseBiometricApi() { return option("biometric_api", false); }
     public boolean isVolumeDownMonitorEnabled() { return option("volume_down_monitor_enabled", true); }
     private String skipKey() { return "skip_" + PluginApp.getCurrentType().name().toLowerCase(Locale.ROOT); }

@@ -1,6 +1,3 @@
 [submodule "3rdparty/MagiskModuleTemplate"]
 	path = 3rdparty/MagiskModuleTemplate
 	url = https://github.com/eritpchy/MagiskModuleTemplate.git
-[submodule "3rdparty/FingerprintIdentify"]
-	path = 3rdparty/FingerprintIdentify
-	url = https://github.com/eritpchy/FingerprintIdentify.git

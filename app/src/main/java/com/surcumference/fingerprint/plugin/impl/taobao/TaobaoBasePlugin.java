@@ -138,6 +138,7 @@ public class TaobaoBasePlugin implements IAppPlugin {
                     if (mCurrentActivity != activity) {
                         return;
                     }
+                    if (!com.surcumference.fingerprint.util.PaymentController.isTargetReady(rootView)) return;
                     boolean isRechargePay = (ViewUtils.isShown(ViewUtils.findViewByName(activity, "com.alipay.android.phone.mobilecommon.verifyidentity", "input_et_password"))
                             && ViewUtils.isShown(ViewUtils.findViewByName(activity, "com.alipay.android.phone.mobilecommon.verifyidentity", "keyboard_container")));
 
@@ -147,7 +148,7 @@ public class TaobaoBasePlugin implements IAppPlugin {
                             || (com.surcumference.fingerprint.util.ShortPasswordTarget.find(rootView) != null
                             && com.surcumference.fingerprint.util.DigitKeyResolver.resolve(rootView,
                             TaobaoVersionControl.getDigitPasswordKeyPad(versionCode), "0123456789") != null);
-                    if (isRechargePay || isNormalPay) {
+                    if (isRechargePay || isNormalPay || hasLongPasswordForm(activity)) {
                         if (mIsViewTreeObserverFirst) {
                             mIsViewTreeObserverFirst = false;
                             showFingerPrintDialog(activity);
@@ -256,7 +257,7 @@ public class TaobaoBasePlugin implements IAppPlugin {
                     }
                 } catch (Exception error) { L.e(error); complete.run(); }
             };
-            if (config.isUnderDisplayFingerprint()) {
+            if (config.isUnderDisplayFingerprint() || config.isUseBiometricApi()) {
                 mPayment.bindToPaymentWindow(token, activity.getWindow(), config.isVolumeDownMonitorEnabled(), () -> {
                     mFingerprintIdentifyTemporaryBlocking = true;
                     Toaster.showLong(Lang.getString(R.id.toast_fingerprint_temporary_disabled));
@@ -264,6 +265,7 @@ public class TaobaoBasePlugin implements IAppPlugin {
                 });
                 mPayment.protectDigits(token, paymentTarget.getRootView(),
                         TaobaoVersionControl.getDigitPasswordKeyPad(getVersionCode(activity)));
+                mPayment.showFingerprintPrompt(token, activity);
                 initFingerPrintLock(context, null, passwordEncrypted, onSuccess);
                 return;
             }
@@ -423,6 +425,17 @@ public class TaobaoBasePlugin implements IAppPlugin {
         pwdEditText.setText(password);
         confirmPwdBtn.performClick();
         return true;
+    }
+
+    private boolean hasLongPasswordForm(Activity activity) {
+        EditText input = findPasswordEditText(activity);
+        if (input == null) return false;
+        int type = input.getInputType();
+        int variation = type & android.text.InputType.TYPE_MASK_VARIATION;
+        return (type & android.text.InputType.TYPE_MASK_CLASS) == android.text.InputType.TYPE_CLASS_TEXT
+                && (variation == android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                || variation == android.text.InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
+                && findConfirmPasswordBtn(activity) != null;
     }
 
     private EditText findPasswordEditText(Activity activity) {

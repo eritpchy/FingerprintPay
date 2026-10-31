@@ -31,6 +31,8 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
     private boolean identifyFinished = true;
     private int remainingAttempts = 8;
     private String identifyStage = "idle";
+    private boolean useBiometricApi;
+    private FingerprintPromptPolicy promptPolicy;
 
     public XBiometricIdentify(Context context) {
         this(context, new FingerprintIdentify(context));
@@ -73,6 +75,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
     }
 
     public T withUseBiometricApi(boolean on) {
+        useBiometricApi = on;
         fingerprintIdentify.setUseBiometricApi(on);
         return (T)this;
     }
@@ -127,6 +130,10 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
                 return (T) this;
             }
             identifyStage = "authentication";
+            promptPolicy = FingerprintPromptPolicy.acquire(context, useBiometricApi);
+            android.util.Log.i("FingerprintPay", "Fingerprint mode=" + (useBiometricApi ? "system" : "custom")
+                    + " host=" + context.getPackageName() + " override=" + (promptPolicy != null)
+                    + " generation=" + generation);
             fingerprintIdentify.startIdentify(new BaseFingerprint.IdentifyListener() {
                 @Override
                 public void onSucceed(@Nullable Cipher cipher) {
@@ -184,6 +191,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
                             && !failInfo.isCancel() && !failInfo.deviceLocked && isCryptoFailure(failInfo.throwable)) {
                         ++identifyGeneration;
                         fingerprintIdentify.cancelIdentify();
+                        releasePromptPolicy();
                         manager.clear(XBiometricIdentify.this);
                         authenticationOnly = true;
                         startIdentify(identifyListener, true);
@@ -227,6 +235,7 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
         }
         identifyFinished = true;
         fingerprintScanStateReady = false;
+        releasePromptPolicy();
         XBiometricIdentifyManager.INSTANCE.clear(this);
         callMockCurrentUserCallback(false);
         return true;
@@ -258,8 +267,15 @@ public class XBiometricIdentify<T extends XBiometricIdentify>{
         try {
             fingerprintIdentify.cancelIdentify();
         } finally {
+            releasePromptPolicy();
             callMockCurrentUserCallback(false);
         }
+    }
+
+    private void releasePromptPolicy() {
+        FingerprintPromptPolicy policy = promptPolicy;
+        promptPolicy = null;
+        if (policy != null) policy.close();
     }
 
     public boolean isUsingBiometricApi() {

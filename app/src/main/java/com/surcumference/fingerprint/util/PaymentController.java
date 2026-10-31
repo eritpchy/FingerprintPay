@@ -31,6 +31,15 @@ public final class PaymentController extends PaymentSession {
     private DigitPasswordKeyPadInfo digitKeys;
     private Runnable removeBackCallback;
 
+    public static boolean isTargetReady(View target) {
+        return target != null && target.getWindowToken() != null && target.isShown()
+                && target.getRootView().getWindowVisibility() == View.VISIBLE;
+    }
+    @Override public boolean begin(Object owner, Object target, long now) {
+        // Initial layout callbacks can run before the payment window is visible.
+        return target instanceof View && isTargetReady((View) target) && super.begin(owner, target, now);
+    }
+
     @Override public void restart(Object owner, Object target) {
         unwatch();
         clear();
@@ -147,6 +156,8 @@ public final class PaymentController extends PaymentSession {
         portraitKeyboards = new ArrayList<>(keyboards);
     }
     private boolean keyboardContains(float x, float y) {
+        if (((View) target()).getResources().getConfiguration().orientation
+                == android.content.res.Configuration.ORIENTATION_LANDSCAPE) return false;
         if (Build.VERSION.SDK_INT >= 24 && owner() instanceof Activity
                 && ((Activity) owner()).isInMultiWindowMode()) return false;
         if (portraitKeyboards != null) {
@@ -213,6 +224,28 @@ public final class PaymentController extends PaymentSession {
         }
         return fallback;
     }
+    public void showFingerprintPrompt(long token, Activity activity) {
+        if (!isActive(token) || Config.from(activity).isHideFingerprintDialog()) return;
+        com.surcumference.fingerprint.view.AlipayPayView view = new com.surcumference.fingerprint.view.AlipayPayView(activity)
+                .withOnCancelButtonClickListener(shown -> finish(token, SystemClock.uptimeMillis()))
+                .withOnDismissListener(shown -> { if (isActive(token)) finish(token, SystemClock.uptimeMillis()); });
+        android.app.AlertDialog dialog = view.showInDialog();
+        dialog.setOnKeyListener((ignored, code, event) -> {
+            if (code == KeyEvent.KEYCODE_VOLUME_DOWN && windowCallback != null)
+                return windowCallback.dispatchKeyEvent(event);
+            if (code == KeyEvent.KEYCODE_BACK) {
+                if (event.getAction() == KeyEvent.ACTION_UP) finish(token, SystemClock.uptimeMillis());
+                return true;
+            }
+            return false;
+        });
+        Runnable previous = restore;
+        restoreWith(token, () -> {
+            if (previous != null) previous.run();
+            com.surcumference.fingerprint.view.DialogUtils.dismiss(dialog);
+        });
+    }
+
     public void restoreWith(long token, Runnable runnable) { if (owns(token)) restore = runnable; }
     public void authentication(long token, XBiometricIdentify identify) {
         if (isActive(token)) authentication = identify;

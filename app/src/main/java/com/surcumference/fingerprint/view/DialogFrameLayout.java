@@ -71,6 +71,7 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
         Window window = dialog.getWindow();
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
         window.setBackgroundDrawable(dialogWindowBackground());
+        mDialog = dialog;
         dialog.show();
         Umeng.onResume(getContext());
         mDialog = dialog;
@@ -248,7 +249,7 @@ public abstract class DialogFrameLayout<T extends DialogFrameLayout> extends Fra
         return btnLLayout;
     }
 
-    private View createDialogContentView(AlertDialog dialog) {
+    protected View createDialogContentView(AlertDialog dialog) {
         Context context = getContext();
         View titleView = createTitleTextView();
         View contentView = this;

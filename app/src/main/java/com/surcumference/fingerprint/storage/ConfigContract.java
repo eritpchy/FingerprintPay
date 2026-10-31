@@ -12,7 +12,7 @@ public final class ConfigContract {
     public static final List<String> PACKAGES = Arrays.asList("com.tencent.mm", "com.eg.android.AlipayGphone",
             "com.taobao.taobao", "com.tencent.mobileqq", "com.unionpay");
     public static final List<String> OPTIONS = Arrays.asList("scope", "switch_on1", "fingerprint_icon",
-            "biometric_api", "volume_down_monitor_enabled");
+            "biometric_api", "hide_fingerprint_dialog", "volume_down_monitor_enabled");
     public static final String TEE_FORMAT = "tee-aes-gcm-v2";
     public static final String SOFTWARE_FORMAT = "software-aes-gcm-v1";
     public static String teeAlias(String backend, int user, String pkg, String id) {
@@ -40,7 +40,7 @@ public final class ConfigContract {
     }
     public static JSONObject defaults() throws Exception {
         return new JSONObject().put("scope", true).put("switch_on1", false)
-                .put("fingerprint_icon", false).put("biometric_api", false)
+                .put("fingerprint_icon", true).put("fingerprint_icon_auto", true).put("biometric_api", false).put("hide_fingerprint_dialog", false)
                 .put("volume_down_monitor_enabled", true).put("credentialVersion", 0)
                 .put("hasPassword", false);
     }

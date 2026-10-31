@@ -54,3 +54,5 @@ com.surcumference.fingerprint.plugin.xposed.UnionPayPlugin {
 -keepclassmembers class okhttp3.internal.publicsuffix.PublicSuffixDatabase {
     private static okhttp3.internal.publicsuffix.PublicSuffixDatabase instance;
 }
+
+-keep class com.surcumference.fingerprint.sensor.SensorDefaults { public static void main(java.lang.String[]); }

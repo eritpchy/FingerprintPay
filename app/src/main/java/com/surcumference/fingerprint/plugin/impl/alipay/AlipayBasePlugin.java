@@ -208,7 +208,8 @@ public class AlipayBasePlugin implements IAppPlugin {
                 Task.onBackground(60000, () -> mFingerprintIdentifyTemporaryBlocking = false);
             });
             protectPaymentKeyboard(activity, token);
-            if (config.isUnderDisplayFingerprint()) {
+            if (config.isUnderDisplayFingerprint() || config.isUseBiometricApi()) {
+                mPaymentSession.showFingerprintPrompt(token, activity);
                 initFingerPrintLock(activity, null, encrypted, onSuccess);
                 return true;
             }

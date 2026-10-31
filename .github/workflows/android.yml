@@ -64,7 +64,7 @@ jobs:
           python3 - <<'PYVERIFY'
           import hashlib, json, os, pathlib, re, subprocess, sys, zipfile
           sys.path.insert(0, 'module')
-          from module_archive import read_file
+          from module_archive import read_file, verify_shared_dex
           root = pathlib.Path('.')
           metadata = json.loads((root / 'app/build/outputs/apk/release/output-metadata.json').read_text())['elements'][0]
           apk = root / 'app/build/outputs/apk/release' / metadata['outputFile']
@@ -75,6 +75,8 @@ jobs:
           dist = root / 'module/webui/dist'
           manifest = json.loads((dist / 'manifest.json').read_text())
           with zipfile.ZipFile(apk) as app, zipfile.ZipFile(module) as archive:
+              parts = json.loads(archive.read('payload-manifest.json'))
+              verify_shared_dex(archive, [app.read(part['name']) for part in parts])
               for name in [*manifest['files'], 'manifest.json']:
                   assert app.read('assets/' + name) == read_file(archive, 'webroot/' + name) == (dist / name).read_bytes(), name
               for abi in ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']:
@@ -88,7 +90,7 @@ jobs:
           assert re.search(r'\bframeworkVersion\(\)(?::[0-9:]+)? -> frameworkVersion$', mapping, re.MULTILINE)
           artifacts = [apk, module]
           (root / 'SHA256SUMS').write_text(''.join(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n' for path in artifacts))
-          print('Verified signed release inputs, four ABIs, R8 and matching WebUI assets')
+          print('Verified signed release inputs, one shared DEX copy, four ABIs, R8 and matching WebUI assets')
           PYVERIFY
       - name: Upload Apk
         uses: actions/upload-artifact@v7

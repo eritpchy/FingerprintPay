@@ -14,6 +14,7 @@ public final class LocalConfigStore implements ConfigStore {
     private final XposedConfigSnapshot snapshot;
     public LocalConfigStore(Context context) {
         this.context = context.getApplicationContext() != null ? context.getApplicationContext() : context;
+        com.surcumference.fingerprint.sensor.SensorLocation.underDisplay(this.context);
         database = new ConfigDatabase(this.context);
         snapshot = new XposedConfigSnapshot(this.context);
     }
@@ -67,6 +68,10 @@ public final class LocalConfigStore implements ConfigStore {
         return doc;
     }
     @Override public JSONObject request(JSONObject request) throws Exception {
+        if ("sensorProperties".equals(request.optString("op"))) {
+            if (!ConfigContract.PACKAGES.contains(request.getString("package"))) throw new SecurityException("Unknown application");
+            return com.surcumference.fingerprint.sensor.SensorProperties.read();
+        }
         synchronized (LOCK) {
             JSONObject doc = document();
             if (doc.getInt("schema") != 2) throw new IllegalStateException("Unsupported configuration schema");
@@ -105,6 +110,7 @@ public final class LocalConfigStore implements ConfigStore {
                         if (ConfigContract.global(name)) globals.put(name, value);
                         else settings.put(name, value);
                     }
+                    if (values.has("fingerprint_icon")) settings.put("fingerprint_icon_auto", false);
                     if (settings.optBoolean("biometric_api")) settings.put("volume_down_monitor_enabled", false);
                     if (settings.optBoolean("switch_on1") && (!settings.has("secret") || !globals.optBoolean("license_agree"))) {
                         throw new IllegalStateException("Accept the license and set a password first");
@@ -142,6 +148,7 @@ public final class LocalConfigStore implements ConfigStore {
     }
     private JSONObject visible(String pkg, JSONObject settings, JSONObject globals, long revision) throws Exception {
         JSONObject visible = new JSONObject(settings.toString()); visible.remove("secret"); visible.remove("legacySecret");
+        com.surcumference.fingerprint.sensor.SensorLocation.applyDefault(context, visible);
         return new JSONObject().put("ok", true).put("passwordProtection", ConfigContract.TEE_FORMAT).put("revision", revision).put("settings", visible).put("globals", globals).put("pending", pending.status(pkg, null));
     }
 }

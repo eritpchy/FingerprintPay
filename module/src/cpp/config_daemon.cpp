@@ -2,10 +2,12 @@
 #include "json.hpp"
 #include "runtime_status.h"
 #include "root_profile.h"
+#include "sensor_probe.h"
 #include <sodium.h>
 #include <sys/file.h>
 #include <poll.h>
 #include <sys/stat.h>
+#include <sys/system_properties.h>
 #include <fcntl.h>
 #include <fstream>
 #include <sstream>
@@ -26,7 +28,7 @@ static const std::string root = "/data/adb/fingerprintpay";
 static const char* package_list = "/data/system/packages.list";
 #endif
 static const std::array<std::string, 5> packages = {"com.tencent.mm", "com.eg.android.AlipayGphone", "com.taobao.taobao", "com.tencent.mobileqq", "com.unionpay"};
-static const std::array<std::string, 5> options = {"scope", "switch_on1", "fingerprint_icon", "biometric_api", "volume_down_monitor_enabled"};
+static const std::array<std::string, 6> options = {"scope", "switch_on1", "fingerprint_icon", "biometric_api", "hide_fingerprint_dialog", "volume_down_monitor_enabled"};
 static std::array<unsigned char, 32> public_key{}, private_key{};
 static bool global_key(const std::string& k) { return k == "license_agree" || k == "auto_update" || k == "skip_xposed" || k == "skip_zygisk"; }
 static std::string hex(const unsigned char* p, size_t n) { std::string out(n * 2 + 1, '\0'); sodium_bin2hex(&out[0], out.size(), p, n); out.resize(n * 2); return out; }
@@ -104,7 +106,7 @@ static void validate_record(const json& record, int user, const std::string& pkg
             || record.at("keyAlias") != prefix + std::to_string(user) + "." + pkg + "." + id
             || iv.size() != 12 || data.size() < 17 || data.size() > 1040) throw std::runtime_error("Invalid password record");
 }
-static json defaults() { return {{"scope", true}, {"switch_on1", false}, {"fingerprint_icon", false}, {"biometric_api", false}, {"volume_down_monitor_enabled", true}, {"credentialVersion", 0}, {"hasPassword", false}}; }
+static json defaults() { return {{"scope", true}, {"switch_on1", false}, {"fingerprint_icon", true}, {"fingerprint_icon_auto", true}, {"biometric_api", false}, {"hide_fingerprint_dialog", false}, {"volume_down_monitor_enabled", true}, {"credentialVersion", 0}, {"hasPassword", false}}; }
 static bool belongs(uid_t uid, const std::string& pkg) {
     std::ifstream list(package_list); std::string line, name; unsigned app_id;
     while (std::getline(list, line)) { std::istringstream row(line); if (row >> name >> app_id && name == pkg && app_id == uid % 100000) return true; }
@@ -115,6 +117,22 @@ static json handle(const json& req, uid_t uid) {
     int user = req.value("user", int(uid / 100000));
     if (std::find(packages.begin(), packages.end(), pkg) == packages.end() || user < 0 || user > 21474) throw std::runtime_error("Unknown application or user");
     if (uid != 0 && (user != int(uid / 100000) || !belongs(uid, pkg))) throw std::runtime_error("Application access denied");
+    if (op == "sensorProperties") {
+        json properties = json::object();
+        for (const char* name : {"persist.vendor.fingerprint.type", "ro.vendor.fingerprint.type",
+                "persist.vendor.fingerprint.sensor_type", "sys.fingerprint.boot", "vendor.fingerprint.boot",
+                "persist.sys.fptype", "persist.vendor.fingerprint.optical.iconsize",
+                "persist.vendor.fingerprint.optical.iconlocation", "ro.hardware.fp.fod", "ro.hardware.fp.udfps",
+                "persist.sys.fp.fod.location.X_Y", "persist.sys.fp.fod.size.width_height",
+                "persist.vendor.sys.fp.fod.location.X_Y", "persist.vendor.sys.fp.fod.size.width_height",
+                "persist.vendor.fingerprint.sensor_location", "ro.vendor.fingerprint.sensor_location",
+                "ro.optical_fingerprint_support"}) {
+            char value[PROP_VALUE_MAX]{};
+            __system_property_get(name, value);
+            properties[name] = value;
+        }
+        return {{"ok", true}, {"properties", properties}};
+    }
     if (op == "publicKey") { if (uid) throw std::runtime_error("Management access denied"); return {{"ok", true}, {"publicKey", hex(public_key.data(), public_key.size())}}; }
     std::string target = std::to_string(user) + ":" + pkg;
     std::string path = root + "/user-" + std::to_string(user) + ".json";
@@ -136,6 +154,20 @@ static json handle(const json& req, uid_t uid) {
     if (!apps.contains(pkg)) {
         std::string scopes = read_file(root + "/scope-defaults.json");
         if (!scopes.empty()) settings["scope"] = json::parse(scopes).value(pkg, true);
+    }
+    if (settings.value("fingerprint_icon_auto", false)) {
+        settings["fingerprint_icon"] = true;
+        settings["fingerprint_icon_detected"] = false;
+        try {
+            auto sensor = json::parse(read_file(root + "/sensor-default.json"));
+            std::string boot = read_file("/proc/sys/kernel/random/boot_id");
+            boot.erase(boot.find_last_not_of("\r\n") + 1);
+            if (!boot.empty() && sensor.value("bootId", std::string()) == boot
+                    && sensor.value("typeStatus", std::string()) == "KNOWN") {
+                settings["fingerprint_icon"] = sensor.at("fingerprint_icon").get<bool>();
+                settings["fingerprint_icon_detected"] = true;
+            }
+        } catch (const std::exception&) { }
     }
     uint64_t revision = doc.at("revision");
     if (op == "scope") return settings.value("scope", false);
@@ -171,6 +203,7 @@ static json handle(const json& req, uid_t uid) {
     if (op != "read") {
         if (req.at("revision") != revision) throw std::runtime_error("Configuration changed; refresh and retry");
         if (op == "patch" || op == "installScope") {
+            if (req.at("values").contains("fingerprint_icon")) settings["fingerprint_icon_auto"] = false;
             if (op == "installScope") {
                 if (uid || req.at("values").size() != 1 || !req.at("values").contains("scope") || !req.at("values").at("scope").is_boolean()) throw std::runtime_error("Management access denied");
                 std::string prior = read_file(root + "/scope-defaults.json");
@@ -227,6 +260,8 @@ int main(int argc, char** argv) {
     if (getuid() != 0) { std::cerr << "FP_CONFIG_ERROR:ROOT_REQUIRED" << std::endl; return 1; }
     if (sodium_init() < 0) return 1;
     try {
+        if (argc == 3 && std::string(argv[1]) == "sensor-defaults")
+            return fp::sensorDefaults(argv[2], root);
         if (argc == 3 && std::string(argv[1]) == "webui-files") {
             auto manifest = json::parse(read_file(argv[2]));
             const auto& files = manifest.at("files");

@@ -84,7 +84,7 @@ public final class ConfigStores {
         }
     }
     static boolean repeatable(String op) {
-        return "read".equals(op) || "credential".equals(op) || "claimPassword".equals(op)
+        return "read".equals(op) || "sensorProperties".equals(op) || "credential".equals(op) || "claimPassword".equals(op)
                 || "passwordStatus".equals(op) || "pendingDonation".equals(op) || "donationStatus".equals(op);
     }
     private static final class ProviderUnavailable extends Exception {}

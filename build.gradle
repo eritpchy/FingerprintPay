@@ -18,11 +18,12 @@ ext.androidApkArtifact = com.android.build.api.artifact.SingleArtifact.APK.INSTA
 allprojects {
     dependencyLocking {
         lockAllConfigurations()
-        if (path == ":3rdparty:FingerprintIdentify:FingerprintIdentifyLib") {
-            lockFile = rootProject.file("gradle/dependency-locks/fingerprint-identify.lockfile")
-        }
     }
     repositories {
+        exclusiveContent {
+            forRepository { maven { url 'https://repo.maven.apache.org/maven2' } }
+            filter { includeGroup 'net.xdow'; includeGroup 'org.lsposed.hiddenapibypass' }
+        }
         def REPOSITORY_URL = 'https://maven.aliyun.com/nexus/content/groups/public/'
         all { ArtifactRepository repo ->
             if (repo instanceof MavenArtifactRepository) {

@@ -23,10 +23,12 @@ public final class XposedConfigSnapshot {
     private static File runtimeFile;
     private final AtomicFile shared;
     private final int user;
+    private final Context context;
     private String contents = "";
     private long managementUntil;
     private String published;
     XposedConfigSnapshot(Context context) {
+        this.context = context;
         user = Process.myUid() / 100000;
         AtomicFile available = null;
         if (XposedActivation.frameworkVersion() >= 93) {
@@ -76,7 +78,10 @@ public final class XposedConfigSnapshot {
     }
     void publish(JSONObject document) throws Exception {
         if (shared == null) return;
-        String value = sanitized(document, user).toString();
+        JSONObject sanitized = sanitized(document, user);
+        try { sanitized.put("sensorProperties", com.surcumference.fingerprint.sensor.SensorProperties.snapshot(context)); }
+        catch (Exception | LinkageError unavailable) { }
+        String value = sanitized.toString();
         if (value.equals(published)) return;
         write(shared, value, managementUntil);
         contents = value;
@@ -148,7 +153,7 @@ public final class XposedConfigSnapshot {
     }
     public static JSONObject read(Context context, JSONObject request) throws Exception {
         String op = request.optString("op");
-        if (!"read".equals(op) && !"credential".equals(op)
+        if (!"read".equals(op) && !"credential".equals(op) && !"sensorProperties".equals(op)
                 && !"pendingPassword".equals(op) && !"pendingDonation".equals(op)) return null;
         XSharedPreferences preferences;
         try {
@@ -163,6 +168,8 @@ public final class XposedConfigSnapshot {
         validateOwner(document, request, context.getPackageName(), user);
         // A snapshot without consent cannot authorize payment and may outlive a failed first setup.
         if (!document.getJSONObject("globals").optBoolean("license_agree")) return null;
+        if ("sensorProperties".equals(op))
+            return com.surcumference.fingerprint.sensor.SensorProperties.fromSnapshot(context, document.optJSONObject("sensorProperties"));
         if ("pendingPassword".equals(op) || "pendingDonation".equals(op)) {
             long remaining = preferences.getLong("managementUntil", 0) - System.currentTimeMillis();
             return remaining > 0 && remaining <= 180000 ? null
